@@ -576,12 +576,44 @@ function Gym() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // DAILY LOG
 // ═══════════════════════════════════════════════════════════════════════════════
+const ACTIVITY_LEVELS=[
+  {val:1.2,   label:"Sedentary (desk job, no exercise)"},
+  {val:1.375, label:"Lightly Active (1-3 days/week)"},
+  {val:1.55,  label:"Moderately Active (3-5 days/week)"},
+  {val:1.725, label:"Very Active (6-7 days/week)"},
+  {val:1.9,   label:"Extra Active (athlete / physical job)"},
+];
+const DEFAULT_SUPPS=["Creatine","Vitamin D","Magnesium","Omega-3"];
+const lsGet=(k,fb)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+
 function DailyLog() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ date:today(), weight:"", sleep:7, energy:7, mood:7, stress:4, protein:"", carbs:"", fat:"", water:"", steps:"", notes:"" });
   const f = (k)=>(v)=>setForm(p=>({...p,[k]:v}));
+
+  // ── TDEE ──
+  const [tdee, setTdee] = useState(()=>lsGet("lifeos_tdee",null));
+  const [showTDEE, setShowTDEE] = useState(false);
+  const [tdeeForm, setTdeeForm] = useState(()=>lsGet("lifeos_tdee",{sex:"male",age:25,heightIn:70,weightLbs:175,activity:1.55}));
+  const tf = (k)=>(v)=>setTdeeForm(p=>({...p,[k]:v}));
+  const calcTDEE=(s)=>{
+    const bmr=s.sex==="male"?4.536*s.weightLbs+12.7*s.heightIn-5*s.age+5:4.536*s.weightLbs+12.7*s.heightIn-5*s.age-161;
+    return Math.round(bmr*parseFloat(s.activity));
+  };
+  const saveTDEE=()=>{ lsSet("lifeos_tdee",tdeeForm); setTdee(tdeeForm); setShowTDEE(false); };
+  const openTDEE=()=>{ setTdeeForm(lsGet("lifeos_tdee",{sex:"male",age:25,heightIn:70,weightLbs:175,activity:1.55})); setShowTDEE(true); };
+
+  // ── Supplements ──
+  const [supplements, setSupplements] = useState(()=>lsGet("lifeos_supplements",DEFAULT_SUPPS));
+  const [suppChecks, setSuppChecks] = useState(()=>lsGet(`lifeos_supps_${today()}`,{}));
+  const [newSupp, setNewSupp] = useState("");
+  const [showAddSupp, setShowAddSupp] = useState(false);
+  const toggleSupp=(name)=>{const next={...suppChecks,[name]:!suppChecks[name]};setSuppChecks(next);lsSet(`lifeos_supps_${today()}`,next);};
+  const addSupp=()=>{if(!newSupp.trim())return;const next=[...supplements,newSupp.trim()];setSupplements(next);lsSet("lifeos_supplements",next);setNewSupp("");};
+  const removeSupp=(name)=>{const next=supplements.filter(s=>s!==name);setSupplements(next);lsSet("lifeos_supplements",next);};
 
   useEffect(()=>{
     sb.from("daily_logs").select("*").order("date",{ascending:true}).then(({data})=>{
@@ -599,10 +631,72 @@ function DailyLog() {
 
   if(loading) return <Spinner />;
   const cals = (form.protein?form.protein*4:0)+(form.carbs?form.carbs*4:0)+(form.fat?form.fat*9:0);
+  const tdeeVal = tdee ? calcTDEE(tdee) : null;
+  const balance = tdeeVal && cals>0 ? Math.round(cals-tdeeVal) : null;
+  const suppDone = supplements.filter(s=>suppChecks[s]).length;
+
+  const inputStyle={ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"10px 12px", fontSize:14, outline:"none", width:"100%", boxSizing:"border-box", fontFamily:"inherit" };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <SectionHeader title="Daily Log" subtitle={new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})} />
+
+      {/* TDEE Card */}
+      <Card>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: showTDEE||!tdeeVal ? 12 : 0 }}>
+          <div style={{ fontSize:12, color:C.amber, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.1em" }}>TDEE / Calorie Target</div>
+          <Btn onClick={showTDEE?()=>setShowTDEE(false):openTDEE} variant="ghost" small>{showTDEE?"Cancel":tdee?"Edit":"Set Up"}</Btn>
+        </div>
+        {showTDEE && (
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ display:"flex", gap:8 }}>
+              {["male","female"].map(s=>(
+                <button key={s} onClick={()=>tf("sex")(s)} style={{ flex:1, padding:"10px 0", borderRadius:8, border:`1px solid ${tdeeForm.sex===s?C.amber+"88":C.border}`, background:tdeeForm.sex===s?C.amber+"22":"transparent", color:tdeeForm.sex===s?C.amber:C.subtext, fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", textTransform:"capitalize" }}>
+                  {s==="male"?"♂ Male":"♀ Female"}
+                </button>
+              ))}
+            </div>
+            <div className="r-grid-3" style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+              <Input label="Age" value={tdeeForm.age} onChange={v=>tf("age")(parseInt(v)||25)} min={10} max={100} />
+              <Input label="Height (in)" value={tdeeForm.heightIn} onChange={v=>tf("heightIn")(parseFloat(v)||70)} step={0.5} />
+              <Input label="Weight (lbs)" value={tdeeForm.weightLbs} onChange={v=>tf("weightLbs")(parseFloat(v)||175)} step={0.5} />
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+              <label style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700 }}>Activity Level</label>
+              <select value={tdeeForm.activity} onChange={e=>tf("activity")(e.target.value)} style={inputStyle}>
+                {ACTIVITY_LEVELS.map(a=><option key={a.val} value={a.val}>{a.label}</option>)}
+              </select>
+            </div>
+            <div style={{ background:C.surface, borderRadius:8, padding:"10px 14px", fontSize:13, color:C.subtext }}>
+              Estimated TDEE: <span style={{ color:C.amber, fontWeight:800 }}>{calcTDEE(tdeeForm).toLocaleString()} kcal/day</span>
+            </div>
+            <Btn onClick={saveTDEE} full>Save TDEE Settings</Btn>
+          </div>
+        )}
+        {!showTDEE && tdeeVal && (
+          <div>
+            <div style={{ display:"flex", gap:20, flexWrap:"wrap", marginBottom: balance!==null ? 14 : 0 }}>
+              <Stat label="Maintenance" value={tdeeVal.toLocaleString()} unit="kcal" color={C.amber}/>
+              {cals>0 && <Stat label="Today" value={Math.round(cals).toLocaleString()} unit="kcal" color={C.blue}/>}
+              {balance!==null && <Stat label={balance<0?"Deficit":"Surplus"} value={Math.abs(balance).toLocaleString()} unit="kcal" color={balance<0?C.accent:C.red}/>}
+            </div>
+            {balance!==null && (
+              <div>
+                <div style={{ height:6, background:C.surface, borderRadius:3, overflow:"hidden" }}>
+                  <div style={{ height:"100%", width:`${Math.min((cals/tdeeVal)*100,110)}%`, background:balance<0?C.accent:C.red, borderRadius:3, transition:"width 0.3s" }}/>
+                </div>
+                <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>{balance<0?`${Math.abs(balance)} kcal below maintenance`:`${balance} kcal above maintenance`}</div>
+              </div>
+            )}
+            {!cals && <p style={{ fontSize:12, color:C.muted, marginTop:8 }}>Log your macros below to see today's balance.</p>}
+          </div>
+        )}
+        {!showTDEE && !tdeeVal && (
+          <p style={{ fontSize:13, color:C.muted }}>Enter your stats to automatically track your calorie deficit or surplus every day.</p>
+        )}
+      </Card>
+
+      {/* Body + Macros */}
       <div className="r-grid-2" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
         <Card>
           <div style={{ fontSize:12, color:C.accent, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>Body</div>
@@ -621,6 +715,37 @@ function DailyLog() {
           </div>
         </Card>
       </div>
+
+      {/* Supplements */}
+      <Card>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <div style={{ fontSize:12, color:C.blue, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.1em" }}>
+            Supplements <span style={{ color:suppDone===supplements.length&&supplements.length>0?C.accent:C.muted, fontWeight:500 }}>{suppDone}/{supplements.length}</span>
+          </div>
+          <Btn onClick={()=>setShowAddSupp(p=>!p)} variant="ghost" small>{showAddSupp?"Done":"+ Add"}</Btn>
+        </div>
+        {showAddSupp && (
+          <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+            <input value={newSupp} onChange={e=>setNewSupp(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSupp()} placeholder="e.g. Zinc, Ashwagandha…"
+              style={{ ...inputStyle, flex:1 }} />
+            <Btn onClick={addSupp} small>Add</Btn>
+          </div>
+        )}
+        {supplements.length===0 && <p style={{ color:C.muted, fontSize:13 }}>No supplements yet. Hit "+ Add" to get started.</p>}
+        <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+          {supplements.map(s=>(
+            <div key={s} style={{ display:"flex", alignItems:"center", gap:12, padding:"9px 0", borderBottom:`1px solid ${C.border}22` }}>
+              <button onClick={()=>toggleSupp(s)} style={{ width:24, height:24, borderRadius:6, border:`2px solid ${suppChecks[s]?C.accent:C.border}`, background:suppChecks[s]?C.accent:"transparent", color:"#000", fontSize:14, fontWeight:900, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.15s" }}>
+                {suppChecks[s]?"✓":""}
+              </button>
+              <span style={{ flex:1, fontSize:14, color:suppChecks[s]?C.accent:C.text, textDecoration:suppChecks[s]?"line-through":"none", transition:"all 0.15s" }}>{s}</span>
+              {showAddSupp && <button onClick={()=>removeSupp(s)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:16, padding:"0 4px", fontFamily:"inherit" }}>✕</button>}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Wellbeing */}
       <Card>
         <div style={{ fontSize:12, color:C.purple, fontWeight:800, marginBottom:18, textTransform:"uppercase", letterSpacing:"0.1em" }}>Wellbeing</div>
         <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
@@ -630,12 +755,15 @@ function DailyLog() {
           <Slider label="Stress" value={form.stress} onChange={f("stress")} color={C.red} />
         </div>
       </Card>
+
+      {/* Notes */}
       <Card>
         <div style={{ fontSize:12, color:C.amber, fontWeight:800, marginBottom:12, textTransform:"uppercase", letterSpacing:"0.1em" }}>Notes & Wins</div>
         <textarea value={form.notes} onChange={e=>f("notes")(e.target.value)} placeholder="What went well? Any insights..."
           style={{ width:"100%", minHeight:90, background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:12, fontSize:14, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }}
           onFocus={e=>e.target.style.borderColor=C.amber} onBlur={e=>e.target.style.borderColor=C.border} />
       </Card>
+
       <Btn onClick={save} disabled={saving} full>{saving?"Saving...":"Save Today's Log"}</Btn>
     </div>
   );
