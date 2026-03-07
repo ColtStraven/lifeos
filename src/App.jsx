@@ -124,7 +124,24 @@ function RestTimer({ seconds, onDone, onSkip }) {
   const [paused, setPaused] = useState(false);
   const ref = useRef();
   useEffect(() => {
-    if (paused||rem<=0) { if(rem<=0) onDone?.(); return; }
+    if (paused||rem<=0) {
+      if (rem<=0) {
+        try {
+          const ctx=new(window.AudioContext||window.webkitAudioContext)();
+          [[0,523],[0.18,659],[0.36,784]].forEach(([t,freq])=>{
+            const osc=ctx.createOscillator(),g=ctx.createGain();
+            osc.connect(g);g.connect(ctx.destination);
+            osc.frequency.value=freq;
+            g.gain.setValueAtTime(0.28,ctx.currentTime+t);
+            g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+t+0.45);
+            osc.start(ctx.currentTime+t);osc.stop(ctx.currentTime+t+0.45);
+          });
+        } catch {}
+        try{navigator.vibrate?.([180,80,180]);}catch{}
+        onDone?.();
+      }
+      return;
+    }
     ref.current = setTimeout(()=>setRem(r=>r-1), 1000);
     return ()=>clearTimeout(ref.current);
   }, [rem, paused]);
@@ -772,56 +789,251 @@ function DailyLog() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // BODY
 // ═══════════════════════════════════════════════════════════════════════════════
+const MEAS_FIELDS=[
+  {k:"waist",l:"Waist",color:C.accent},{k:"chest",l:"Chest",color:C.blue},{k:"hips",l:"Hips",color:C.purple},
+  {k:"bicep",l:"Bicep",color:C.amber},{k:"thigh",l:"Thigh",color:C.red},{k:"shoulder",l:"Shoulders",color:C.blue},
+  {k:"neck",l:"Neck",color:C.subtext},{k:"calf",l:"Calf",color:C.accent},
+];
+
+const compressImage=(file,maxW=900,q=0.72)=>new Promise(res=>{
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(1,maxW/img.width);
+      const c=document.createElement("canvas");
+      c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      res(c.toDataURL("image/jpeg",q));
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
 function Body() {
-  const [measurements, setMeasurements] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ date:today(), chest:"", waist:"", hips:"", neck:"", shoulder:"", bicep:"", thigh:"", calf:"", bf:"" });
-  const f = (k)=>(v)=>setForm(p=>({...p,[k]:v}));
+  const [measurements,setMeasurements]=useState([]);
+  const [photos,setPhotos]=useState([]);
+  const [logs,setLogs]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [bodyTab,setBodyTab]=useState("measurements");
+  const [form,setForm]=useState({date:today(),chest:"",waist:"",hips:"",neck:"",shoulder:"",bicep:"",thigh:"",calf:"",bf:""});
+  const f=(k)=>(v)=>setForm(p=>({...p,[k]:v}));
 
-  useEffect(()=>{ Promise.all([sb.from("measurements").select("*").order("date",{ascending:true}), sb.from("daily_logs").select("date,weight").order("date",{ascending:true})]).then(([m,l])=>{ if(m.data)setMeasurements(m.data); if(l.data)setLogs(l.data); setLoading(false); }); },[]);
+  // Charts
+  const [chartField,setChartField]=useState("waist");
 
-  const save = async () => { setSaving(true); const {error}=await sb.from("measurements").upsert({date:form.date,chest:form.chest||null,waist:form.waist||null,hips:form.hips||null,neck:form.neck||null,shoulder:form.shoulder||null,bicep:form.bicep||null,thigh:form.thigh||null,calf:form.calf||null,bf:form.bf||null},{onConflict:"date"}); if(!error){const{data}=await sb.from("measurements").select("*").order("date");if(data)setMeasurements(data);alert("✓ Saved!");} setSaving(false); };
+  // Photos
+  const [photoFile,setPhotoFile]=useState(null);
+  const [photoDate,setPhotoDate]=useState(today());
+  const [photoNotes,setPhotoNotes]=useState("");
+  const [uploading,setUploading]=useState(false);
+  const [compareA,setCompareA]=useState("");
+  const [compareB,setCompareB]=useState("");
+  const [photosSupported,setPhotosSupported]=useState(true);
 
-  if(loading) return <Spinner />;
-  const wData = logs.filter(l=>l.weight).map(l=>({date:l.date,weight:parseFloat(l.weight)}));
+  useEffect(()=>{
+    Promise.all([
+      sb.from("measurements").select("*").order("date",{ascending:true}),
+      sb.from("daily_logs").select("date,weight").order("date",{ascending:true}),
+      sb.from("progress_photos").select("id,date,notes,photo_data").order("date",{ascending:true}),
+    ]).then(([m,l,p])=>{
+      if(m.data)setMeasurements(m.data);
+      if(l.data)setLogs(l.data);
+      if(p.data){
+        setPhotos(p.data);
+        if(p.data.length>=1)setCompareA(p.data[0].date);
+        if(p.data.length>=2)setCompareB(p.data[p.data.length-1].date);
+      } else if(p.error){setPhotosSupported(false);}
+      setLoading(false);
+    });
+  },[]);
+
+  const saveMeasurements=async()=>{
+    setSaving(true);
+    const{error}=await sb.from("measurements").upsert({date:form.date,chest:form.chest||null,waist:form.waist||null,hips:form.hips||null,neck:form.neck||null,shoulder:form.shoulder||null,bicep:form.bicep||null,thigh:form.thigh||null,calf:form.calf||null,bf:form.bf||null},{onConflict:"date"});
+    if(!error){const{data}=await sb.from("measurements").select("*").order("date");if(data)setMeasurements(data);alert("✓ Saved!");}
+    setSaving(false);
+  };
+
+  const uploadPhoto=async()=>{
+    if(!photoFile)return;
+    setUploading(true);
+    try{
+      const data=await compressImage(photoFile);
+      const{error}=await sb.from("progress_photos").insert({id:String(uid()),date:photoDate,notes:photoNotes||null,photo_data:data});
+      if(!error){
+        const{data:rows}=await sb.from("progress_photos").select("id,date,notes,photo_data").order("date",{ascending:true});
+        if(rows){setPhotos(rows);if(rows.length>=1)setCompareA(rows[0].date);if(rows.length>=2)setCompareB(rows[rows.length-1].date);}
+        setPhotoFile(null);setPhotoNotes("");
+      } else alert("Upload failed: "+error.message);
+    } catch(e){alert("Error: "+e.message);}
+    setUploading(false);
+  };
+
+  const deletePhoto=async(id)=>{
+    if(!confirm("Delete this photo?"))return;
+    await sb.from("progress_photos").delete().eq("id",id);
+    setPhotos(p=>p.filter(x=>x.id!==id));
+  };
+
+  if(loading)return<Spinner/>;
+
+  const wData=logs.filter(l=>l.weight).map(l=>({date:l.date,weight:parseFloat(l.weight)}));
   const fields=[{k:"chest",l:"Chest"},{k:"waist",l:"Waist"},{k:"hips",l:"Hips"},{k:"neck",l:"Neck"},{k:"shoulder",l:"Shoulders"},{k:"bicep",l:"Bicep"},{k:"thigh",l:"Thigh"},{k:"calf",l:"Calf"}];
+  const selField=MEAS_FIELDS.find(f=>f.k===chartField)||MEAS_FIELDS[0];
+  const chartData=measurements.filter(m=>m[chartField]!=null).map(m=>({date:m.date,[chartField]:parseFloat(m[chartField])}));
+  const photoByDate=Object.fromEntries(photos.map(p=>[p.date,p]));
+  const photoA=photoByDate[compareA];
+  const photoB=photoByDate[compareB];
+  const BODY_TABS=[{id:"measurements",label:"Measurements"},{id:"charts",label:"Charts"},{id:"photos",label:"Photos"}];
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-      <SectionHeader title="Body Recomp" subtitle="Track measurements & weight trend" />
-      {wData.length>2 && <Card>
-        <div style={{ fontSize:12, color:C.accent, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>Weight Trend</div>
-        <ResponsiveContainer width="100%" height={180}>
-          <AreaChart data={wData}>
-            <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="95%" stopColor={C.accent} stopOpacity={0}/></linearGradient></defs>
-            <CartesianGrid stroke={C.border} strokeDasharray="3 3"/>
-            <XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/>
-            <YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}}/>
-            <Tooltip content={<CTip />}/>
-            <Area type="monotone" dataKey="weight" name="Weight" stroke={C.accent} fill="url(#wg)" strokeWidth={2} dot={false}/>
-          </AreaChart>
-        </ResponsiveContainer>
-      </Card>}
-      <Card>
-        <div style={{ fontSize:12, color:C.blue, fontWeight:800, marginBottom:16, textTransform:"uppercase", letterSpacing:"0.1em" }}>Log Measurements</div>
-        <div style={{ marginBottom:14 }}><Input label="Date" type="text" value={form.date} onChange={f("date")} /></div>
-        <div className="r-grid-2" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
-          {fields.map(({k,l})=><Input key={k} label={l} value={form[k]} onChange={f(k)} step={0.1} unit="in"/>)}
-        </div>
-        <div style={{ marginBottom:14 }}><Input label="Body Fat %" value={form.bf} onChange={f("bf")} step={0.1} unit="%"/></div>
-        <Btn onClick={save} disabled={saving} full>{saving?"Saving...":"Save Measurements"}</Btn>
-      </Card>
-      {measurements.length>0 && <Card>
-        <div style={{ fontSize:12, color:C.purple, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>History</div>
-        <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-            <thead><tr>{["Date","Chest","Waist","Hips","Bicep","BF%"].map(h=><th key={h} style={{ textAlign:"left", padding:"6px 10px", borderBottom:`1px solid ${C.border}`, fontWeight:700, fontSize:11, color:C.muted }}>{h}</th>)}</tr></thead>
-            <tbody>{[...measurements].reverse().slice(0,10).map((m,i)=><tr key={i}>{[fmt(m.date),m.chest,m.waist,m.hips,m.bicep,m.bf].map((v,j)=><td key={j} style={{ padding:"8px 10px", borderBottom:`1px solid ${C.border}22`, color:C.subtext }}>{v||"—"}</td>)}</tr>)}</tbody>
-          </table>
-        </div>
-      </Card>}
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <SectionHeader title="Body Recomp" subtitle="Measurements, trends & progress photos"/>
+
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+        {BODY_TABS.map(t=>(
+          <button key={t.id} onClick={()=>setBodyTab(t.id)} style={{flexShrink:0,padding:"6px 14px",borderRadius:8,border:`1px solid ${bodyTab===t.id?C.accent:C.border}`,background:bodyTab===t.id?C.accentDim:"transparent",color:bodyTab===t.id?C.accent:C.subtext,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── MEASUREMENTS ── */}
+      {bodyTab==="measurements" && <>
+        {wData.length>2 && <Card>
+          <div style={{fontSize:12,color:C.accent,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Weight Trend</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={wData}>
+              <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="95%" stopColor={C.accent} stopOpacity={0}/></linearGradient></defs>
+              <CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
+              <Area type="monotone" dataKey="weight" name="Weight" stroke={C.accent} fill="url(#wg)" strokeWidth={2} dot={false}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>}
+        <Card>
+          <div style={{fontSize:12,color:C.blue,fontWeight:800,marginBottom:16,textTransform:"uppercase",letterSpacing:"0.1em"}}>Log Measurements</div>
+          <div style={{marginBottom:14}}><Input label="Date" type="text" value={form.date} onChange={f("date")}/></div>
+          <div className="r-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            {fields.map(({k,l})=><Input key={k} label={l} value={form[k]} onChange={f(k)} step={0.1} unit="in"/>)}
+          </div>
+          <div style={{marginBottom:14}}><Input label="Body Fat %" value={form.bf} onChange={f("bf")} step={0.1} unit="%"/></div>
+          <Btn onClick={saveMeasurements} disabled={saving} full>{saving?"Saving...":"Save Measurements"}</Btn>
+        </Card>
+        {measurements.length>0 && <Card>
+          <div style={{fontSize:12,color:C.purple,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>History</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead><tr>{["Date","Chest","Waist","Hips","Bicep","BF%"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 10px",borderBottom:`1px solid ${C.border}`,fontWeight:700,fontSize:11,color:C.muted}}>{h}</th>)}</tr></thead>
+              <tbody>{[...measurements].reverse().slice(0,10).map((m,i)=><tr key={i}>{[fmt(m.date),m.chest,m.waist,m.hips,m.bicep,m.bf].map((v,j)=><td key={j} style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}22`,color:C.subtext}}>{v||"—"}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+        </Card>}
+      </>}
+
+      {/* ── CHARTS ── */}
+      {bodyTab==="charts" && <>
+        {measurements.length<2
+          ? <Card><p style={{color:C.muted,textAlign:"center",padding:40}}>Log at least 2 measurement entries to see trends.</p></Card>
+          : <>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {MEAS_FIELDS.map(mf=>{
+                const hasData=measurements.some(m=>m[mf.k]!=null);
+                return <button key={mf.k} onClick={()=>setChartField(mf.k)} disabled={!hasData}
+                  style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${chartField===mf.k?mf.color:C.border}`,background:chartField===mf.k?mf.color+"22":"transparent",color:chartField===mf.k?mf.color:hasData?C.subtext:C.muted,fontSize:12,fontWeight:700,cursor:hasData?"pointer":"default",fontFamily:"inherit",opacity:hasData?1:0.4}}>
+                  {mf.l}
+                </button>;
+              })}
+            </div>
+            {chartData.length>=2 ? <Card>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{fontSize:12,color:selField.color,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.1em"}}>{selField.l} Trend</div>
+                <div style={{display:"flex",gap:12}}>
+                  {chartData.length>=2 && <Stat label="Start" value={chartData[0][chartField]} unit="in" color={C.muted}/>}
+                  <Stat label="Latest" value={chartData[chartData.length-1][chartField]} unit="in" color={selField.color}/>
+                  {chartData.length>=2 && (() => {
+                    const diff=(chartData[chartData.length-1][chartField]-chartData[0][chartField]).toFixed(1);
+                    return <Stat label="Change" value={(diff>0?"+":"")+diff} unit="in" color={diff<0?C.accent:diff>0?C.red:C.muted}/>;
+                  })()}
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={chartData}>
+                  <defs><linearGradient id={`cg_${chartField}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={selField.color} stopOpacity={0.2}/><stop offset="95%" stopColor={selField.color} stopOpacity={0}/></linearGradient></defs>
+                  <CartesianGrid stroke={C.border} strokeDasharray="3 3"/>
+                  <XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/>
+                  <YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}} tickFormatter={v=>v+"\""}/>
+                  <Tooltip content={<CTip/>}/>
+                  <Area type="monotone" dataKey={chartField} name={selField.l} stroke={selField.color} fill={`url(#cg_${chartField})`} strokeWidth={2} dot={{r:4,fill:selField.color,stroke:"none"}}/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </Card> : <Card><p style={{color:C.muted,textAlign:"center",padding:30,fontSize:13}}>Not enough {selField.l.toLowerCase()} data points yet.</p></Card>}
+          </>
+        }
+      </>}
+
+      {/* ── PHOTOS ── */}
+      {bodyTab==="photos" && <>
+        {!photosSupported && <Card style={{border:`1px solid ${C.amber}44`}}>
+          <div style={{fontSize:13,color:C.amber}}>Create a <code style={{background:C.surface,padding:"2px 6px",borderRadius:4}}>progress_photos</code> table in Supabase with columns: <code style={{background:C.surface,padding:"2px 6px",borderRadius:4}}>id text, date text, notes text, photo_data text</code></div>
+        </Card>}
+
+        <Card>
+          <div style={{fontSize:12,color:C.purple,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Upload Photo</div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <Input label="Date" type="text" value={photoDate} onChange={setPhotoDate}/>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>Photo</label>
+              <input type="file" accept="image/*" onChange={e=>setPhotoFile(e.target.files[0]||null)}
+                style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            </div>
+            {photoFile && <div style={{fontSize:12,color:C.muted}}>Will compress to ~800px wide before saving.</div>}
+            <input placeholder="Notes (optional, e.g. 8 weeks in)" value={photoNotes} onChange={e=>setPhotoNotes(e.target.value)}
+              style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"10px 12px",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            <Btn onClick={uploadPhoto} disabled={!photoFile||uploading} full>{uploading?"Compressing & Saving…":"Upload Photo"}</Btn>
+          </div>
+        </Card>
+
+        {photos.length>=2 && <Card>
+          <div style={{fontSize:12,color:C.blue,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Side-by-Side Comparison</div>
+          <div className="r-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            {[{val:compareA,set:setCompareA,label:"Before"},{val:compareB,set:setCompareB,label:"After"}].map(({val,set,label})=>(
+              <div key={label} style={{display:"flex",flexDirection:"column",gap:6}}>
+                <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>{label}</label>
+                <select value={val} onChange={e=>set(e.target.value)} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"8px 10px",fontSize:13,outline:"none"}}>
+                  {photos.map(p=><option key={p.id} value={p.date}>{fmt(p.date)}{p.notes?` — ${p.notes}`:""}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div className="r-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            {[photoA,photoB].map((p,i)=>p
+              ? <div key={i} style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <img src={p.photo_data} alt={p.date} style={{width:"100%",borderRadius:10,objectFit:"cover",aspectRatio:"3/4",border:`1px solid ${C.border}`}}/>
+                  <div style={{fontSize:12,color:C.subtext,textAlign:"center"}}>{fmt(p.date)}{p.notes&&<><br/><span style={{fontSize:11,color:C.muted}}>{p.notes}</span></>}</div>
+                </div>
+              : <div key={i} style={{background:C.surface,borderRadius:10,aspectRatio:"3/4",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{color:C.muted,fontSize:13}}>No photo</span></div>
+            )}
+          </div>
+        </Card>}
+
+        {photos.length>0 && <Card>
+          <div style={{fontSize:12,color:C.accent,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>All Photos</div>
+          <div style={{display:"flex",gap:10,overflowX:"auto",paddingBottom:4}}>
+            {[...photos].reverse().map(p=>(
+              <div key={p.id} style={{flexShrink:0,width:120,display:"flex",flexDirection:"column",gap:6}}>
+                <img src={p.photo_data} alt={p.date} style={{width:120,height:160,objectFit:"cover",borderRadius:8,border:`1px solid ${C.border}`}}/>
+                <div style={{fontSize:11,color:C.subtext,textAlign:"center",lineHeight:1.3}}>{fmt(p.date)}</div>
+                <button onClick={()=>deletePhoto(p.id)} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>delete</button>
+              </div>
+            ))}
+          </div>
+        </Card>}
+
+        {photos.length===0&&photosSupported && <Card><p style={{color:C.muted,textAlign:"center",padding:40,fontSize:13}}>Upload your first progress photo above.</p></Card>}
+      </>}
     </div>
   );
 }
