@@ -195,6 +195,8 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
   const [resting, setResting] = useState(false);
   const [restSecs, setRestSecs] = useState(120);
   const [restKey, setRestKey] = useState(0);
+  const [exList, setExList] = useState(() => [...exercises]);
+  const [showSwap, setShowSwap] = useState(false);
   const [showPlates, setShowPlates] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -207,7 +209,7 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
         idx: i, exercise: ex.exercise,
         targetWeight: next.weight, targetReps: next.reps,
         actualWeight: next.weight, actualReps: "",
-        completed: false, pr: false,
+        completed: false, pr: false, note: "", showNote: false,
       }));
     })
   );
@@ -217,7 +219,7 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
     return ()=>clearInterval(t);
   }, []);
 
-  const curEx = exercises[exIdx];
+  const curEx = exList[exIdx];
   const curSets = setLog[exIdx]||[];
   const prevSetsForEx = lastSets.filter(s=>s.exercise===curEx.exercise);
   const nextTarget = calcNextTarget(curEx.exercise, curEx, prevSetsForEx);
@@ -227,7 +229,8 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
   const updateSet = (si, key, val) => setSetLog(prev=>prev.map((exs,ei)=>ei!==exIdx?exs:exs.map((s,i)=>i!==si?s:{...s,[key]:val})));
 
   useEffect(() => {
-    setRestSecs(exercises[exIdx]?.rest_seconds || 120);
+    setRestSecs(exList[exIdx]?.rest_seconds || 120);
+    setShowSwap(false);
   }, [exIdx]);
 
   const completeSet = (si) => {
@@ -240,13 +243,19 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
     setResting(true);
   };
 
+  const swapExercise = (newEx) => {
+    setExList(prev => prev.map((ex,i) => i!==exIdx ? ex : {...ex, exercise:newEx}));
+    setSetLog(prev => prev.map((exs,ei) => ei!==exIdx ? exs : exs.map(s => ({...s, exercise:newEx}))));
+    setShowSwap(false);
+  };
+
   const finishWorkout = async () => {
     setSaving(true);
     const allSets = setLog.flat().filter(s=>s.completed);
     const vol = allSets.reduce((sum,s)=>(parseFloat(s.actualWeight)||0)*(parseInt(s.actualReps)||0)+sum,0);
     const sid = uid();
     await sb.from("workout_sessions").insert({ id:sid, template_id:template.id, template_name:template.name, started_at:new Date(startRef.current).toISOString(), finished_at:new Date().toISOString(), duration_seconds:elapsed, total_volume:vol, date:today() });
-    if (allSets.length) await sb.from("session_sets").insert(allSets.map((s,i)=>({ id:uid()+i, session_id:sid, exercise:s.exercise, set_number:s.idx+1, target_weight:s.targetWeight, target_reps:s.targetReps, actual_weight:parseFloat(s.actualWeight)||0, actual_reps:parseInt(s.actualReps)||0, completed:true, pr:s.pr })));
+    if (allSets.length) await sb.from("session_sets").insert(allSets.map((s,i)=>({ id:uid()+i, session_id:sid, exercise:s.exercise, set_number:s.idx+1, target_weight:s.targetWeight, target_reps:s.targetReps, actual_weight:parseFloat(s.actualWeight)||0, actual_reps:parseInt(s.actualReps)||0, completed:true, pr:s.pr, note:s.note||null })));
     setSaving(false);
     onFinish({ totalVol:vol, sets:allSets, elapsed, prs:allSets.filter(s=>s.pr) });
   };
@@ -274,7 +283,7 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
 
       {/* Exercise tabs */}
       <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:4 }}>
-        {exercises.map((ex,i)=>{
+        {exList.map((ex,i)=>{
           const done=(setLog[i]||[]).every(s=>s.completed)&&(setLog[i]||[]).length>0;
           const partial=(setLog[i]||[]).some(s=>s.completed);
           return <button key={i} onClick={()=>{setResting(false);setExIdx(i);}}
@@ -289,41 +298,66 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
 
       {/* Current exercise */}
       {!resting && <Card>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
-          <div>
-            <div style={{ fontSize:20, fontWeight:900, color:C.text, marginBottom:4 }}>{curEx.exercise}</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:showSwap?10:14 }}>
+          <div style={{ flex:1, minWidth:0, marginRight:10 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4, flexWrap:"wrap" }}>
+              <div style={{ fontSize:20, fontWeight:900, color:C.text }}>{curEx.exercise}</div>
+              <button onClick={()=>setShowSwap(p=>!p)} style={{ background:showSwap?C.red+"22":C.blue+"22", border:`1px solid ${showSwap?C.red+"44":C.blue+"44"}`, color:showSwap?C.red:C.blue, borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", flexShrink:0 }}>
+                {showSwap ? "Cancel" : "⇄ Swap"}
+              </button>
+            </div>
             <div style={{ fontSize:12, color:nextTarget.arrow==="↑"?C.accent:nextTarget.arrow==="↓"?C.red:C.subtext, fontWeight:600 }}>{nextTarget.note}</div>
           </div>
-          <button onClick={()=>setShowPlates(p=>!p)} style={{ background:C.amber+"22", border:`1px solid ${C.amber}44`, color:C.amber, borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+          <button onClick={()=>setShowPlates(p=>!p)} style={{ background:C.amber+"22", border:`1px solid ${C.amber}44`, color:C.amber, borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", flexShrink:0 }}>
             {showPlates?"Hide":"🏋️ Plates"}
           </button>
         </div>
 
+        {showSwap && (
+          <div style={{ marginBottom:14 }}>
+            <ExSelect value={curEx.exercise} onChange={swapExercise} />
+          </div>
+        )}
+
         {showPlates && <div style={{ marginBottom:16 }}><PlateCalc defaultWeight={parseFloat(curSets[0]?.actualWeight)||135} /></div>}
 
         {/* Set table */}
-        <div style={{ display:"grid", gridTemplateColumns:"36px 80px 1fr 1fr 44px", gap:8, marginBottom:8 }}>
-          {["Set","Target","Weight","Reps",""].map(h=><div key={h} style={{ fontSize:10, color:C.muted, textTransform:"uppercase", fontWeight:700, textAlign:"center" }}>{h}</div>)}
+        <div style={{ display:"grid", gridTemplateColumns:"36px 80px 1fr 1fr 44px 28px", gap:8, marginBottom:8 }}>
+          {["Set","Target","Weight","Reps","",""].map((h,i)=><div key={i} style={{ fontSize:10, color:C.muted, textTransform:"uppercase", fontWeight:700, textAlign:"center" }}>{h}</div>)}
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
           {curSets.map((s,si)=>(
-            <div key={si} style={{ display:"grid", gridTemplateColumns:"36px 80px 1fr 1fr 44px", gap:8, alignItems:"center", opacity:s.completed?0.55:1 }}>
-              <div style={{ textAlign:"center", fontSize:15, fontWeight:900, color:s.completed?(s.pr?C.amber:C.accent):C.muted }}>
-                {s.completed?(s.pr?"★":"✓"):si+1}
+            <div key={si} style={{ display:"flex", flexDirection:"column", gap:4 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"36px 80px 1fr 1fr 44px 28px", gap:8, alignItems:"center", opacity:s.completed?0.55:1 }}>
+                <div style={{ textAlign:"center", fontSize:15, fontWeight:900, color:s.completed?(s.pr?C.amber:C.accent):C.muted }}>
+                  {s.completed?(s.pr?"★":"✓"):si+1}
+                </div>
+                <div style={{ textAlign:"center", fontSize:12, color:C.subtext, fontFamily:"'DM Mono',monospace", lineHeight:1.3 }}>
+                  {s.targetWeight}lbs<br/>{s.targetReps}reps
+                </div>
+                <input type="number" value={s.actualWeight} disabled={s.completed} step={2.5}
+                  onChange={e=>updateSet(si,"actualWeight",e.target.value)}
+                  style={{ background:C.surface, border:`1px solid ${s.completed?C.accent+"33":C.border}`, borderRadius:8, color:C.text, padding:"12px 8px", fontSize:17, fontWeight:900, textAlign:"center", outline:"none", fontFamily:"'DM Mono',monospace", width:"100%" }} />
+                <input type="number" value={s.actualReps} disabled={s.completed}
+                  onChange={e=>updateSet(si,"actualReps",e.target.value)}
+                  style={{ background:C.surface, border:`1px solid ${s.completed?C.accent+"33":C.border}`, borderRadius:8, color:C.text, padding:"12px 8px", fontSize:17, fontWeight:900, textAlign:"center", outline:"none", fontFamily:"'DM Mono',monospace", width:"100%" }} />
+                <button disabled={s.completed} onClick={()=>completeSet(si)}
+                  style={{ background:s.completed?C.accent+"22":C.accent, color:s.completed?C.accent:"#000", border:"none", borderRadius:8, padding:"12px 0", fontSize:18, fontWeight:900, cursor:s.completed?"default":"pointer", width:"100%" }}>
+                  {s.completed?"✓":"→"}
+                </button>
+                <button onClick={()=>updateSet(si,"showNote",!s.showNote)}
+                  style={{ background:"transparent", border:`1px solid ${s.note?C.blue+"66":C.border}`, color:s.note?C.blue:C.muted, borderRadius:8, padding:"12px 0", fontSize:13, cursor:"pointer", width:"100%", fontFamily:"inherit" }}
+                  title="Add note">
+                  {s.note?"💬":"✎"}
+                </button>
               </div>
-              <div style={{ textAlign:"center", fontSize:12, color:C.subtext, fontFamily:"'DM Mono',monospace", lineHeight:1.3 }}>
-                {s.targetWeight}lbs<br/>{s.targetReps}reps
-              </div>
-              <input type="number" value={s.actualWeight} disabled={s.completed} step={2.5}
-                onChange={e=>updateSet(si,"actualWeight",e.target.value)}
-                style={{ background:C.surface, border:`1px solid ${s.completed?C.accent+"33":C.border}`, borderRadius:8, color:C.text, padding:"12px 8px", fontSize:17, fontWeight:900, textAlign:"center", outline:"none", fontFamily:"'DM Mono',monospace", width:"100%" }} />
-              <input type="number" value={s.actualReps} disabled={s.completed}
-                onChange={e=>updateSet(si,"actualReps",e.target.value)}
-                style={{ background:C.surface, border:`1px solid ${s.completed?C.accent+"33":C.border}`, borderRadius:8, color:C.text, padding:"12px 8px", fontSize:17, fontWeight:900, textAlign:"center", outline:"none", fontFamily:"'DM Mono',monospace", width:"100%" }} />
-              <button disabled={s.completed} onClick={()=>completeSet(si)}
-                style={{ background:s.completed?C.accent+"22":C.accent, color:s.completed?C.accent:"#000", border:"none", borderRadius:8, padding:"12px 0", fontSize:18, fontWeight:900, cursor:s.completed?"default":"pointer", width:"100%" }}>
-                {s.completed?"✓":"→"}
-              </button>
+              {(s.showNote || s.note) && (
+                <input type="text" placeholder="Note this set… e.g. felt easy, left shoulder tight"
+                  value={s.note} disabled={s.completed}
+                  onChange={e=>updateSet(si,"note",e.target.value)}
+                  style={{ background:C.surface, border:`1px solid ${C.blue}44`, borderRadius:8, color:C.text, padding:"8px 12px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", fontFamily:"inherit" }}
+                  onFocus={e=>e.target.style.borderColor=C.blue} onBlur={e=>e.target.style.borderColor=C.blue+"44"} />
+              )}
             </div>
           ))}
         </div>
@@ -343,7 +377,7 @@ function ActiveWorkout({ template, exercises, lastSets, onFinish, onCancel }) {
       {/* Nav between exercises */}
       <div style={{ display:"flex", gap:8 }}>
         {exIdx>0 && <Btn onClick={()=>{setResting(false);setExIdx(i=>i-1);}} variant="ghost">← Prev</Btn>}
-        {exIdx<exercises.length-1 && <Btn onClick={()=>{setResting(false);setExIdx(i=>i+1);}} variant="ghost" style={{ marginLeft:"auto" }}>Next →</Btn>}
+        {exIdx<exList.length-1 && <Btn onClick={()=>{setResting(false);setExIdx(i=>i+1);}} variant="ghost" style={{ marginLeft:"auto" }}>Next →</Btn>}
       </div>
 
       <div style={{ display:"flex", gap:10 }}>
