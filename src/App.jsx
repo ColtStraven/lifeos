@@ -851,6 +851,9 @@ function Body() {
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [bodyTab,setBodyTab]=useState("measurements");
+  const [height,setHeight]=useState(70);
+  const [heightInput,setHeightInput]=useState(70);
+  const [settingsOpen,setSettingsOpen]=useState(false);
   const [form,setForm]=useState({date:today(),chest:"",waist:"",hips:"",neck:"",shoulder:"",bicep:"",thigh:"",calf:"",bf:""});
   const f=(k)=>(v)=>setForm(p=>({...p,[k]:v}));
 
@@ -871,7 +874,8 @@ function Body() {
       sb.from("measurements").select("*").order("date",{ascending:true}),
       sb.from("daily_logs").select("date,weight").order("date",{ascending:true}),
       sb.from("progress_photos").select("id,date,notes,photo_data").order("date",{ascending:true}),
-    ]).then(([m,l,p])=>{
+      sb.from("user_settings").select("*").limit(1),
+    ]).then(([m,l,p,us])=>{
       if(m.data)setMeasurements(m.data);
       if(l.data)setLogs(l.data);
       if(p.data){
@@ -879,6 +883,7 @@ function Body() {
         if(p.data.length>=1)setCompareA(p.data[0].date);
         if(p.data.length>=2)setCompareB(p.data[p.data.length-1].date);
       } else if(p.error){setPhotosSupported(false);}
+      if(us.data&&us.data.length){const h=parseFloat(us.data[0].height_inches)||70;setHeight(h);setHeightInput(h);}
       setLoading(false);
     });
   },[]);
@@ -888,6 +893,12 @@ function Body() {
     const{error}=await sb.from("measurements").upsert({date:form.date,chest:form.chest||null,waist:form.waist||null,hips:form.hips||null,neck:form.neck||null,shoulder:form.shoulder||null,bicep:form.bicep||null,thigh:form.thigh||null,calf:form.calf||null,bf:form.bf||null},{onConflict:"date"});
     if(!error){const{data}=await sb.from("measurements").select("*").order("date");if(data)setMeasurements(data);toast("Measurements saved!");}
     setSaving(false);
+  };
+
+  const saveHeight=async()=>{
+    const h=parseFloat(heightInput)||70;
+    await sb.from("user_settings").upsert({id:"singleton",height_inches:h},{onConflict:"id"});
+    setHeight(h);setSettingsOpen(false);toast("Height saved!");
   };
 
   const uploadPhoto=async()=>{
@@ -920,7 +931,7 @@ function Body() {
   const photoByDate=Object.fromEntries(photos.map(p=>[p.date,p]));
   const photoA=photoByDate[compareA];
   const photoB=photoByDate[compareB];
-  const BODY_TABS=[{id:"measurements",label:"Measurements"},{id:"charts",label:"Charts"},{id:"photos",label:"Photos"}];
+  const BODY_TABS=[{id:"measurements",label:"Measurements"},{id:"charts",label:"Charts"},{id:"photos",label:"Photos"},{id:"physique",label:"Physique Engine"}];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -1067,6 +1078,182 @@ function Body() {
 
         {photos.length===0&&photosSupported && <Card><p style={{color:C.muted,textAlign:"center",padding:40,fontSize:13}}>Upload your first progress photo above.</p></Card>}
       </>}
+
+      {/* ── PHYSIQUE ENGINE ── */}
+      {bodyTab==="physique" && (()=>{
+        const latestM=[...measurements].reverse().find(m=>m.waist&&m.neck);
+        const latestS=[...measurements].reverse().find(m=>m.shoulder);
+        const latestW=[...logs].reverse().find(l=>l.weight);
+        const H=height;
+
+        const navyBF=(()=>{
+          if(!latestM||!H)return null;
+          const diff=parseFloat(latestM.waist)-parseFloat(latestM.neck);
+          if(diff<=0)return null;
+          return parseFloat((86.010*Math.log10(diff)-70.041*Math.log10(H)+36.76).toFixed(1));
+        })();
+
+        const w=latestW?parseFloat(latestW.weight):null;
+        const leanMass=(w&&navyBF!=null)?parseFloat((w*(1-navyBF/100)).toFixed(1)):null;
+        const fatMass=(w&&navyBF!=null)?parseFloat((w*(navyBF/100)).toFixed(1)):null;
+        const whr=latestM?parseFloat((parseFloat(latestM.waist)/H).toFixed(3)):null;
+        const swr=(latestM&&latestS)?parseFloat((parseFloat(latestS.shoulder)/parseFloat(latestM.waist)).toFixed(2)):null;
+        const heightM=H*0.0254;
+        const ffmi=leanMass?parseFloat(((leanMass/2.205)/(heightM*heightM)).toFixed(1)):null;
+        const mDaysAgo=latestM?Math.floor((Date.now()-new Date(latestM.date+"T12:00:00"))/86400000):null;
+
+        const timeline=measurements.filter(m=>m.waist&&m.neck).map(m=>{
+          const diff=parseFloat(m.waist)-parseFloat(m.neck);
+          if(diff<=0)return null;
+          const bf=parseFloat((86.010*Math.log10(diff)-70.041*Math.log10(H)+36.76).toFixed(1));
+          const wEntry=logs.reduce((best,l)=>{
+            if(!l.weight)return best;
+            if(!best)return l;
+            return Math.abs(new Date(l.date)-new Date(m.date))<Math.abs(new Date(best.date)-new Date(m.date))?l:best;
+          },null);
+          const mw=wEntry?parseFloat(wEntry.weight):null;
+          return{date:m.date,navy_bf:bf,lean_mass:mw?parseFloat((mw*(1-bf/100)).toFixed(1)):null,fat_mass:mw?parseFloat((mw*(bf/100)).toFixed(1)):null};
+        }).filter(Boolean);
+
+        let recomp=null;
+        if(timeline.length>=2){
+          const prev=timeline[timeline.length-2],curr=timeline[timeline.length-1];
+          if(prev.lean_mass&&curr.lean_mass&&prev.fat_mass&&curr.fat_mass){
+            const lU=curr.lean_mass>prev.lean_mass,fD=curr.fat_mass<prev.fat_mass;
+            recomp=lU&&fD?"holy_grail":lU?"lean_up":fD?"fat_down":"neither";
+          }
+        }
+
+        const bfColor=navyBF==null?C.muted:navyBF<15?C.accent:navyBF<20?C.amber:C.red;
+        const whrColor=whr==null?C.muted:whr<0.45?C.accent:whr<0.5?C.amber:C.red;
+        const swrColor=swr==null?C.muted:swr>1.618?C.accent:swr>1.4?C.amber:C.red;
+        const ffmiColor=ffmi==null?C.muted:ffmi>=22?C.accent:ffmi>=20?C.amber:C.red;
+        const prevLean=timeline.length>=2?timeline[timeline.length-2].lean_mass:null;
+        const prevFat=timeline.length>=2?timeline[timeline.length-2].fat_mass:null;
+        const leanDiff=leanMass&&prevLean?parseFloat((leanMass-prevLean).toFixed(1)):null;
+        const fatDiff=fatMass&&prevFat?parseFloat((fatMass-prevFat).toFixed(1)):null;
+        const recompMap={
+          holy_grail:{msg:"Holy grail recomp — lean mass rising, fat mass dropping simultaneously.",color:C.accent,icon:"🏆"},
+          lean_up:{msg:"Building lean mass — fat also rising slightly. Tighten nutrition for a cleaner bulk.",color:C.amber,icon:"📈"},
+          fat_down:{msg:"Losing fat — lean mass slightly down. Prioritize protein to protect muscle.",color:C.amber,icon:"📉"},
+          neither:{msg:"No recomp signal since last measurement. Reassess diet and training stimulus.",color:C.red,icon:"📊"},
+        };
+
+        const metricCard=(label,value,unit,color,sub)=>(
+          <div style={{background:C.surface,borderRadius:12,padding:14,border:`1px solid ${color}33`}}>
+            <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700,marginBottom:6}}>{label}</div>
+            <div style={{fontSize:28,fontWeight:900,color,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{value!=null?value+(unit||""):"—"}</div>
+            {sub&&<div style={{fontSize:10,color:C.muted,marginTop:5}}>{sub}</div>}
+          </div>
+        );
+
+        return(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {/* Height setting */}
+            <Card>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:settingsOpen?14:0}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.1em"}}>Height — {H}"</div>
+                <Btn small variant="ghost" onClick={()=>setSettingsOpen(p=>!p)}>{settingsOpen?"Cancel":"Edit"}</Btn>
+              </div>
+              {settingsOpen&&<div style={{display:"flex",gap:10,alignItems:"flex-end"}}>
+                <div style={{flex:1}}><Input label="Height (inches)" value={heightInput} onChange={setHeightInput} min={48} max={96} step={0.5}/></div>
+                <Btn onClick={saveHeight}>Save</Btn>
+              </div>}
+            </Card>
+
+            {mDaysAgo>7&&<Card style={{border:`1px solid ${C.amber}44`,background:C.amber+"08"}}>
+              <div style={{fontSize:13,color:C.amber}}>Metrics last updated <strong>{mDaysAgo} days ago</strong> — log new measurements for fresh estimates.</div>
+            </Card>}
+
+            {!latestM&&<Card><p style={{color:C.muted,textAlign:"center",padding:30,fontSize:13}}>Log waist and neck measurements to unlock the Physique Engine.</p></Card>}
+
+            {latestM&&<>
+              {/* Score card */}
+              <Card>
+                <div style={{fontSize:12,color:C.accent,fontWeight:800,marginBottom:16,textTransform:"uppercase",letterSpacing:"0.1em"}}>Physique Score Card</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {metricCard("Est. Body Fat",navyBF,"%",bfColor,navyBF!=null?(navyBF<15?"Lean":navyBF<20?"Average":"High")+" · Navy formula":null)}
+                  {metricCard("FFMI",ffmi,null,ffmiColor,ffmi!=null?(ffmi>=25?"Near natural ceiling":ffmi>=22?"Excellent":ffmi>=20?"Good":"Building")+" · lean mass index":null)}
+                  <div style={{background:C.surface,borderRadius:12,padding:14,border:`1px solid ${C.blue}33`}}>
+                    <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700,marginBottom:6}}>Lean Mass</div>
+                    <div style={{fontSize:28,fontWeight:900,color:C.blue,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{leanMass!=null?leanMass+"lb":"—"}</div>
+                    {leanDiff!=null&&<div style={{fontSize:11,color:leanDiff>=0?C.accent:C.red,marginTop:5}}>{leanDiff>=0?"↑ +":"↓ "}{leanDiff}lb since last</div>}
+                  </div>
+                  <div style={{background:C.surface,borderRadius:12,padding:14,border:`1px solid ${C.red}33`}}>
+                    <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700,marginBottom:6}}>Fat Mass</div>
+                    <div style={{fontSize:28,fontWeight:900,color:C.red,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{fatMass!=null?fatMass+"lb":"—"}</div>
+                    {fatDiff!=null&&<div style={{fontSize:11,color:fatDiff<=0?C.accent:C.red,marginTop:5}}>{fatDiff<=0?"↓ ":"↑ +"}{fatDiff}lb since last</div>}
+                  </div>
+                  {metricCard("Waist:Height",whr,null,whrColor,whr!=null?(whr<0.45?"Excellent":whr<0.5?"Good":"Reduce")+" · target < 0.45":null)}
+                  {metricCard("Shoulder:Waist",swr,null,swrColor,swr!=null?(swr>1.618?"Golden ratio ✓":swr>1.4?"Close":"Build shoulders")+" · target 1.618":null)}
+                </div>
+              </Card>
+
+              {/* Recomp status */}
+              {recomp&&(()=>{const r=recompMap[recomp];return(
+                <Card style={{border:`1px solid ${r.color}55`,background:r.color+"08"}}>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                    <div style={{fontSize:22,lineHeight:1,flexShrink:0}}>{r.icon}</div>
+                    <div>
+                      <div style={{fontSize:12,color:r.color,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Recomp Status</div>
+                      <div style={{fontSize:13,color:C.text,lineHeight:1.5}}>{r.msg}</div>
+                    </div>
+                  </div>
+                </Card>
+              );})()}
+
+              {/* BF% trend chart */}
+              {timeline.length>=2&&<Card>
+                <div style={{fontSize:12,color:C.purple,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Estimated BF% Over Time</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={timeline}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3"/>
+                    <XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/>
+                    <YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}} tickFormatter={v=>v+"%"}/>
+                    <Tooltip content={<CTip/>}/>
+                    <Line type="monotone" dataKey="navy_bf" name="Navy BF%" stroke={C.purple} strokeWidth={2} dot={{r:4,fill:C.purple,stroke:"none"}}/>
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>}
+
+              {/* Body composition trend */}
+              {timeline.filter(t=>t.lean_mass).length>=2&&<Card>
+                <div style={{fontSize:12,color:C.blue,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Body Composition Over Time</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={timeline}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3"/>
+                    <XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/>
+                    <YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}} tickFormatter={v=>v+"lb"}/>
+                    <Tooltip content={<CTip/>}/>
+                    <Line type="monotone" dataKey="lean_mass" name="Lean Mass" stroke={C.blue} strokeWidth={2} dot={{r:4,fill:C.blue,stroke:"none"}}/>
+                    <Line type="monotone" dataKey="fat_mass" name="Fat Mass" stroke={C.red} strokeWidth={2} dot={{r:4,fill:C.red,stroke:"none"}}/>
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>}
+
+              {/* Benchmarks reference */}
+              <Card>
+                <div style={{fontSize:12,color:C.muted,fontWeight:800,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.1em"}}>Benchmarks Reference</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {[
+                    {label:"Body Fat %",green:"< 15%",amber:"15–20%",red:"> 20%"},
+                    {label:"FFMI",green:"≥ 22",amber:"20–22",red:"< 20"},
+                    {label:"Waist:Height",green:"< 0.45",amber:"0.45–0.50",red:"> 0.50"},
+                    {label:"Shoulder:Waist",green:"> 1.618",amber:"1.40–1.618",red:"< 1.40"},
+                  ].map(b=>(
+                    <div key={b.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,flexWrap:"wrap"}}>
+                      <span style={{color:C.subtext,minWidth:130,fontWeight:600}}>{b.label}</span>
+                      <span style={{color:C.accent,background:C.accent+"18",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{b.green}</span>
+                      <span style={{color:C.amber,background:C.amber+"18",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{b.amber}</span>
+                      <span style={{color:C.red,background:C.red+"18",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{b.red}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
