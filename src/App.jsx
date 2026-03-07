@@ -44,6 +44,17 @@ const C = { bg:"#0a0a0f", surface:"#12121a", card:"#16161f", border:"#1e1e2e", a
 
 const EXERCISES = ["Squat","Bench Press","Deadlift","Overhead Press","Barbell Row","Incline Press","Romanian Deadlift","Sumo Deadlift","Close Grip Bench","Skull Crusher","Hack Squat","DB Bench Press","DB Incline Press","DB Shoulder Press","DB Row","DB Curl","DB Hammer Curl","DB Incline Curl","DB Lateral Raise","DB Front Raise","DB Fly","DB Incline Fly","DB Romanian Deadlift","DB Lunge","DB Bulgarian Split Squat","DB Goblet Squat","DB Tricep Kickback","DB Overhead Tricep Extension","DB Shrug","DB Reverse Fly","DB Wrist Curl","Pull-up","Chin-up","Dip","Cable Row","Seated Row","Lat Pulldown","Chest Supported Row","Cable Fly","Cable Lateral Raise","Tricep Pushdown","Cable Curl","Face Pull","Leg Press","Hip Thrust","Leg Curl","Leg Extension","Calf Raise","Bulgarian Split Squat","Chest Fly","DB Flat Press","Machine Shoulder Press","Cable Rear Delt Fly","Rope Overhead Tricep Extension","Rope Pushdowns","Cable Pushdowns","Wide Grip Lat Pulldown","Single Arm DB Row","Low Incline DB Press"];
 
+// ─── HOOKS ───────────────────────────────────────────────────────────────────
+function useIsMobile() {
+  const [m, setM] = useState(() => window.innerWidth < 640);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < 640);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return m;
+}
+
 // ─── UI PRIMITIVES ───────────────────────────────────────────────────────────
 const Tag = ({ children, color = C.accent }) => <span style={{ background: color+"22", color, border:`1px solid ${color}44`, borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase" }}>{children}</span>;
 const Card = ({ children, style={} }) => <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:20, ...style }}>{children}</div>;
@@ -354,7 +365,7 @@ function WorkoutSummary({ data, onDone }) {
         <div style={{ fontSize:52, marginBottom:10 }}>🏆</div>
         <h2 style={{ margin:0, fontSize:26, fontWeight:900, color:C.accent }}>Workout Complete!</h2>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:12 }}>
+      <div className="r-grid-3" style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:12 }}>
         <Card><Stat label="Duration" value={Math.floor(elapsed/60)} unit="min" color={C.blue} /></Card>
         <Card><Stat label="Volume" value={(totalVol/1000).toFixed(1)} unit="k lbs" color={C.accent} /></Card>
         <Card><Stat label="Sets" value={sets.length} color={C.purple} /></Card>
@@ -455,7 +466,7 @@ function Gym() {
               <label style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700 }}>Exercise</label>
               <ExSelect value={ex.exercise} onChange={v=>updateEx(ex.id,"exercise",v)} />
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+            <div className="r-grid-3" style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
               <Input label="Sets" value={ex.sets} onChange={v=>updateEx(ex.id,"sets",parseInt(v)||3)} min={1} max={10} />
               <Input label="Min Reps" value={ex.min_reps} onChange={v=>updateEx(ex.id,"min_reps",parseInt(v)||6)} min={1} max={30} />
               <Input label="Max Reps" value={ex.max_reps} onChange={v=>updateEx(ex.id,"max_reps",parseInt(v)||12)} min={1} max={30} />
@@ -558,7 +569,7 @@ function DailyLog() {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <SectionHeader title="Daily Log" subtitle={new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})} />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+      <div className="r-grid-2" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
         <Card>
           <div style={{ fontSize:12, color:C.accent, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>Body</div>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
@@ -634,7 +645,7 @@ function Body() {
       <Card>
         <div style={{ fontSize:12, color:C.blue, fontWeight:800, marginBottom:16, textTransform:"uppercase", letterSpacing:"0.1em" }}>Log Measurements</div>
         <div style={{ marginBottom:14 }}><Input label="Date" type="text" value={form.date} onChange={f("date")} /></div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+        <div className="r-grid-2" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
           {fields.map(({k,l})=><Input key={k} label={l} value={form[k]} onChange={f(k)} step={0.1} unit="in"/>)}
         </div>
         <div style={{ marginBottom:14 }}><Input label="Body Fat %" value={form.bf} onChange={f("bf")} step={0.1} unit="%"/></div>
@@ -681,7 +692,7 @@ function Goals() {
       {show && <Card>
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <Input label="Goal title" type="text" value={form.title} onChange={f("title")}/>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+          <div className="r-grid-2" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
             <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
               <label style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700 }}>Category</label>
               <select value={form.category} onChange={e=>f("category")(e.target.value)} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"10px 12px", fontSize:14, outline:"none" }}>
@@ -744,7 +755,7 @@ function Analytics() {
         <SectionHeader title="Analytics" subtitle="Your trends at a glance"/>
         <div style={{ display:"flex", gap:8 }}>{["7","30"].map(r=><Btn key={r} onClick={()=>setRange(r)} variant={range===r?"primary":"ghost"} small>{r}D</Btn>)}</div>
       </div>
-      <Card><div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:20 }}>
+      <Card><div className="r-grid-4" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:20 }}>
         <Stat label="Avg Energy" value={avg(data.filter(d=>d.energy).map(d=>d.energy))} unit="/10" color={C.accent}/>
         <Stat label="Avg Mood" value={avg(data.filter(d=>d.mood).map(d=>d.mood))} unit="/10" color={C.purple}/>
         <Stat label="Avg Sleep" value={avg(data.filter(d=>d.sleep).map(d=>d.sleep))} unit="hrs" color={C.blue}/>
@@ -808,14 +819,14 @@ function Dashboard() {
       <Card style={{ border:todayLog?`1px solid ${C.accent}44`:`1px solid ${C.border}` }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div><div style={{ fontSize:13, color:C.muted, marginBottom:4 }}>Today's Log</div><div style={{ fontSize:16, fontWeight:700, color:todayLog?C.accent:C.amber }}>{todayLog?"✓ Logged":"⚠ Not logged yet"}</div></div>
-          {todayLog && <div style={{ display:"flex", gap:20 }}>
+          {todayLog && <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
             {todayLog.weight&&<Stat label="Weight" value={todayLog.weight} unit="lbs" color={C.text}/>}
             {todayLog.energy&&<Stat label="Energy" value={todayLog.energy} unit="/10" color={C.accent}/>}
             {todayLog.sleep&&<Stat label="Sleep" value={todayLog.sleep} unit="hrs" color={C.blue}/>}
           </div>}
         </div>
       </Card>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
+      <div className="r-grid-3" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
         <Card><Stat label="Log Streak" value={streak} unit="days" color={C.amber} sub="Keep it up!"/></Card>
         <Card><Stat label="This Week" value={weekWorkouts} unit="sessions" color={C.blue}/></Card>
         <Card><Stat label="Active Goals" value={activeGoals.length} color={C.purple}/></Card>
@@ -857,6 +868,7 @@ const NAV=[{id:"dashboard",icon:"◈",label:"Dashboard"},{id:"daily",icon:"◎",
 
 export default function LifeOS() {
   const [tab,setTab]=useState("dashboard");
+  const isMobile=useIsMobile();
   const pages={dashboard:Dashboard,daily:DailyLog,gym:Gym,body:Body,goals:Goals,analytics:Analytics};
   const Page=pages[tab];
   return (
@@ -870,6 +882,11 @@ export default function LifeOS() {
         input[type=range]{-webkit-appearance:none;height:4px;background:#1e1e2e;border-radius:2px;}
         input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;cursor:pointer;}
         select option{background:#12121a;}
+        @media(max-width:639px){
+          .r-grid-2{grid-template-columns:1fr!important;}
+          .r-grid-3{grid-template-columns:repeat(2,1fr)!important;}
+          .r-grid-4{grid-template-columns:repeat(2,1fr)!important;}
+        }
       `}</style>
       <div style={{ position:"sticky", top:0, zIndex:100, background:"#0a0a0fee", backdropFilter:"blur(12px)", borderBottom:`1px solid ${C.border}`, padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -882,18 +899,34 @@ export default function LifeOS() {
           <span style={{ fontSize:11, color:C.subtext }}>Cloud sync</span>
         </div>
       </div>
-      <div style={{ display:"flex", minHeight:"calc(100vh - 57px)" }}>
-        <nav style={{ width:180, padding:"24px 12px", borderRight:`1px solid ${C.border}`, flexShrink:0, display:"flex", flexDirection:"column", gap:4 }}>
-          {NAV.map(n=>(
-            <button key={n.id} onClick={()=>setTab(n.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px", background:tab===n.id?C.accentDim:"transparent", border:tab===n.id?`1px solid ${C.accentMid}`:"1px solid transparent", borderRadius:8, color:tab===n.id?C.accent:C.subtext, cursor:"pointer", fontSize:14, fontWeight:tab===n.id?700:500, textAlign:"left", transition:"all 0.15s", fontFamily:"inherit" }}>
-              <span style={{ fontSize:16 }}>{n.icon}</span>{n.label}
-            </button>
-          ))}
-        </nav>
-        <main style={{ flex:1, padding:"24px 28px", overflowY:"auto" }}>
-          <Page/>
-        </main>
-      </div>
+      {isMobile ? (
+        <>
+          <main style={{ flex:1, padding:"16px 14px 76px", overflowY:"auto", minHeight:"calc(100vh - 57px)" }}>
+            <Page/>
+          </main>
+          <nav style={{ position:"fixed", bottom:0, left:0, right:0, display:"flex", background:"#0a0a0fee", backdropFilter:"blur(12px)", borderTop:`1px solid ${C.border}`, zIndex:100, paddingBottom:"env(safe-area-inset-bottom,0px)" }}>
+            {NAV.map(n=>(
+              <button key={n.id} onClick={()=>setTab(n.id)} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, padding:"8px 4px", background:"transparent", border:"none", borderTop:`2px solid ${tab===n.id?C.accent:"transparent"}`, color:tab===n.id?C.accent:C.muted, cursor:"pointer", fontSize:9, fontWeight:tab===n.id?700:500, fontFamily:"inherit", transition:"color 0.15s" }}>
+                <span style={{ fontSize:18, lineHeight:1 }}>{n.icon}</span>
+                {n.label.split(" ")[0]}
+              </button>
+            ))}
+          </nav>
+        </>
+      ) : (
+        <div style={{ display:"flex", minHeight:"calc(100vh - 57px)" }}>
+          <nav style={{ width:180, padding:"24px 12px", borderRight:`1px solid ${C.border}`, flexShrink:0, display:"flex", flexDirection:"column", gap:4 }}>
+            {NAV.map(n=>(
+              <button key={n.id} onClick={()=>setTab(n.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px", background:tab===n.id?C.accentDim:"transparent", border:tab===n.id?`1px solid ${C.accentMid}`:"1px solid transparent", borderRadius:8, color:tab===n.id?C.accent:C.subtext, cursor:"pointer", fontSize:14, fontWeight:tab===n.id?700:500, textAlign:"left", transition:"all 0.15s", fontFamily:"inherit" }}>
+                <span style={{ fontSize:16 }}>{n.icon}</span>{n.label}
+              </button>
+            ))}
+          </nav>
+          <main style={{ flex:1, padding:"24px 28px", overflowY:"auto" }}>
+            <Page/>
+          </main>
+        </div>
+      )}
     </div>
   );
 }
