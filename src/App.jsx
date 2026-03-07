@@ -40,7 +40,7 @@ function getPlates(w) {
 }
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-const C = { bg:"#0a0a0f", surface:"#12121a", card:"#16161f", border:"#1e1e2e", accent:"#00ff88", accentDim:"#00ff8822", accentMid:"#00ff8855", red:"#ff4466", amber:"#ffaa00", blue:"#4488ff", purple:"#aa44ff", text:"#e8e8f0", muted:"#5a5a7a", subtext:"#9090b0" };
+const C = { bg:"#08080d", surface:"#101018", card:"#14141c", border:"#1e1e2e", accent:"#00ff88", accentDim:"#00ff8818", accentMid:"#00ff8844", red:"#ff4466", amber:"#ffaa00", blue:"#4d8fff", purple:"#b44dff", text:"#eaeaf4", muted:"#55556a", subtext:"#8888a8" };
 
 const EXERCISES = ["Squat","Bench Press","Deadlift","Overhead Press","Barbell Row","Incline Press","Romanian Deadlift","Sumo Deadlift","Close Grip Bench","Skull Crusher","Hack Squat","DB Bench Press","DB Incline Press","DB Shoulder Press","DB Row","DB Curl","DB Hammer Curl","DB Incline Curl","DB Lateral Raise","DB Front Raise","DB Fly","DB Incline Fly","DB Romanian Deadlift","DB Lunge","DB Bulgarian Split Squat","DB Goblet Squat","DB Tricep Kickback","DB Overhead Tricep Extension","DB Shrug","DB Reverse Fly","DB Wrist Curl","Pull-up","Chin-up","Dip","Cable Row","Seated Row","Lat Pulldown","Chest Supported Row","Cable Fly","Cable Lateral Raise","Tricep Pushdown","Cable Curl","Face Pull","Leg Press","Hip Thrust","Leg Curl","Leg Extension","Calf Raise","Bulgarian Split Squat","Chest Fly","DB Flat Press","Machine Shoulder Press","Cable Rear Delt Fly","Rope Overhead Tricep Extension","Rope Pushdowns","Cable Pushdowns","Wide Grip Lat Pulldown","Single Arm DB Row","Low Incline DB Press"];
 
@@ -55,31 +55,64 @@ function useIsMobile() {
   return m;
 }
 
+// ─── TOAST ───────────────────────────────────────────────────────────────────
+let _toast = () => {};
+const toast = (msg, type="success") => _toast(msg, type);
+function ToastContainer() {
+  const [toasts, setToasts] = useState([]);
+  useEffect(() => {
+    _toast = (msg, type="success") => {
+      const id = uid();
+      setToasts(p => [...p, {id, msg, type}]);
+      setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3000);
+    };
+  }, []);
+  if (!toasts.length) return null;
+  return (
+    <div style={{ position:"fixed", bottom:24, right:20, zIndex:9999, display:"flex", flexDirection:"column", gap:8, pointerEvents:"none" }}>
+      {toasts.map(t => (
+        <div key={t.id} style={{ background:"linear-gradient(135deg,#1a1a24,#141420)", border:`1px solid ${t.type==="error"?C.red+"55":C.accent+"55"}`, borderRadius:12, padding:"13px 18px", color:t.type==="error"?C.red:C.text, fontSize:14, fontWeight:600, boxShadow:"0 12px 40px rgba(0,0,0,0.6)", backdropFilter:"blur(16px)", animation:"slideIn 0.22s ease-out", display:"flex", alignItems:"center", gap:10, minWidth:200, maxWidth:320 }}>
+          <span style={{ fontSize:16, color:t.type==="error"?C.red:C.accent }}>{t.type==="error"?"✕":"✓"}</span>
+          {t.msg}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── UI PRIMITIVES ───────────────────────────────────────────────────────────
-const Tag = ({ children, color = C.accent }) => <span style={{ background: color+"22", color, border:`1px solid ${color}44`, borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase" }}>{children}</span>;
-const Card = ({ children, style={} }) => <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:20, ...style }}>{children}</div>;
-const Spinner = () => <div style={{ display:"flex", alignItems:"center", justifyContent:"center", padding:60 }}><div style={{ width:32, height:32, border:`3px solid ${C.border}`, borderTop:`3px solid ${C.accent}`, borderRadius:"50%", animation:"spin 0.8s linear infinite" }} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+const Tag = ({ children, color = C.accent }) => <span style={{ background:color+"18", color, border:`1px solid ${color}33`, borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase" }}>{children}</span>;
+const Card = ({ children, style={} }) => <div style={{ background:"linear-gradient(155deg,#17171f 0%,#13131a 100%)", border:`1px solid ${C.border}`, borderRadius:16, padding:20, boxShadow:"0 4px 20px rgba(0,0,0,0.3)", ...style }}>{children}</div>;
+const Spinner = () => <div style={{ display:"flex", alignItems:"center", justifyContent:"center", padding:60 }}><div style={{ width:36, height:36, border:`2px solid ${C.border}`, borderTop:`2px solid ${C.accent}`, borderRight:`2px solid ${C.accent}44`, borderRadius:"50%", animation:"spin 0.7s linear infinite" }} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
 
 const Btn = ({ children, onClick, variant="primary", small=false, disabled=false, full=false, style={} }) => {
-  const vs = { primary:{background:C.accent,color:"#000",border:"none"}, ghost:{background:"transparent",color:C.accent,border:`1px solid ${C.accent}44`}, danger:{background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`}, amber:{background:C.amber+"22",color:C.amber,border:`1px solid ${C.amber}44`} };
-  return <button onClick={onClick} disabled={disabled} style={{ ...vs[variant], borderRadius:8, padding:small?"6px 14px":"11px 22px", fontSize:small?12:14, fontWeight:700, cursor:disabled?"not-allowed":"pointer", opacity:disabled?0.5:1, letterSpacing:"0.04em", transition:"all 0.15s", width:full?"100%":"auto", fontFamily:"inherit", ...style }}
-    onMouseOver={e=>!disabled&&(e.currentTarget.style.opacity="0.8")} onMouseOut={e=>!disabled&&(e.currentTarget.style.opacity="1")}>{children}</button>;
+  const vs = {
+    primary:{ background:`linear-gradient(135deg,${C.accent},#00d4a0)`, color:"#000", border:"none", boxShadow:`0 4px 18px ${C.accent}33` },
+    ghost:{ background:"transparent", color:C.accent, border:`1px solid ${C.accent}33` },
+    danger:{ background:C.red+"18", color:C.red, border:`1px solid ${C.red}33` },
+    amber:{ background:C.amber+"18", color:C.amber, border:`1px solid ${C.amber}33` },
+  };
+  return <button onClick={onClick} disabled={disabled}
+    style={{ ...vs[variant], borderRadius:9, padding:small?"6px 14px":"11px 22px", fontSize:small?12:14, fontWeight:700, cursor:disabled?"not-allowed":"pointer", opacity:disabled?0.5:1, letterSpacing:"0.04em", transition:"all 0.15s", width:full?"100%":"auto", fontFamily:"inherit", ...style }}
+    onMouseOver={e=>{if(disabled)return;e.currentTarget.style.opacity="0.85";if(variant==="primary")e.currentTarget.style.boxShadow=`0 6px 28px ${C.accent}55`;}}
+    onMouseOut={e=>{if(disabled)return;e.currentTarget.style.opacity="1";if(variant==="primary")e.currentTarget.style.boxShadow=`0 4px 18px ${C.accent}33`;}}>{children}</button>;
 };
 
 const Input = ({ label, type="number", value, onChange, min, max, step=1, unit, placeholder }) => (
-  <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+  <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
     {label && <label style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700 }}>{label}{unit && <span style={{ color:C.subtext }}> ({unit})</span>}</label>}
     <input type={type} value={value} placeholder={placeholder} onChange={e=>onChange(type==="number"?parseFloat(e.target.value)||"":e.target.value)} min={min} max={max} step={step}
-      style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"10px 12px", fontSize:15, outline:"none", width:"100%", boxSizing:"border-box", transition:"border-color 0.2s" }}
-      onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+      style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, color:C.text, padding:"10px 13px", fontSize:15, outline:"none", width:"100%", boxSizing:"border-box", transition:"all 0.2s" }}
+      onFocus={e=>{e.target.style.borderColor=C.accent;e.target.style.boxShadow=`0 0 0 3px ${C.accent}18`;}}
+      onBlur={e=>{e.target.style.borderColor=C.border;e.target.style.boxShadow="none";}} />
   </div>
 );
 
 const Slider = ({ label, value, onChange, min=1, max=10, color=C.accent }) => (
   <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-    <div style={{ display:"flex", justifyContent:"space-between" }}>
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
       <label style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700 }}>{label}</label>
-      <span style={{ fontSize:18, fontWeight:800, color, fontFamily:"'DM Mono',monospace" }}>{value}</span>
+      <span style={{ fontSize:20, fontWeight:900, color, fontFamily:"'DM Mono',monospace" }}>{value}</span>
     </div>
     <input type="range" min={min} max={max} value={value} onChange={e=>onChange(parseInt(e.target.value))} style={{ width:"100%", accentColor:color, cursor:"pointer" }} />
     <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:C.muted }}><span>{min} — Low</span><span>High — {max}</span></div>
@@ -87,23 +120,23 @@ const Slider = ({ label, value, onChange, min=1, max=10, color=C.accent }) => (
 );
 
 const Stat = ({ label, value, unit, color=C.accent, sub }) => (
-  <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
-    <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700 }}>{label}</div>
-    <div style={{ fontSize:28, fontWeight:900, color, fontFamily:"'DM Mono',monospace", lineHeight:1 }}>{value}<span style={{ fontSize:13, fontWeight:500, color:C.subtext, marginLeft:3 }}>{unit}</span></div>
+  <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+    <div style={{ fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:"0.1em", fontWeight:700 }}>{label}</div>
+    <div style={{ fontSize:26, fontWeight:900, color, fontFamily:"'DM Mono',monospace", lineHeight:1 }}>{value}<span style={{ fontSize:12, fontWeight:500, color:C.subtext, marginLeft:3 }}>{unit}</span></div>
     {sub && <div style={{ fontSize:11, color:C.subtext }}>{sub}</div>}
   </div>
 );
 
 const SectionHeader = ({ title, subtitle }) => (
   <div style={{ marginBottom:20 }}>
-    <h2 style={{ margin:0, fontSize:20, fontWeight:900, color:C.text, letterSpacing:"-0.02em" }}>{title}</h2>
-    {subtitle && <p style={{ margin:"4px 0 0", fontSize:13, color:C.subtext }}>{subtitle}</p>}
+    <h2 style={{ margin:0, fontSize:22, fontWeight:900, color:C.text, letterSpacing:"-0.03em", lineHeight:1.2 }}>{title}</h2>
+    {subtitle && <p style={{ margin:"5px 0 0", fontSize:13, color:C.muted }}>{subtitle}</p>}
   </div>
 );
 
 const CTip = ({ active, payload, label }) => {
   if (!active||!payload?.length) return null;
-  return <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:"10px 14px" }}>
+  return <div style={{ background:"#1a1a24", border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 14px", boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
     <div style={{ fontSize:11, color:C.muted, marginBottom:6 }}>{fmt(label)}</div>
     {payload.map((p,i)=><div key={i} style={{ fontSize:13, color:p.color, fontWeight:700 }}>{p.name}: {typeof p.value==="number"?p.value.toFixed(1):p.value}</div>)}
   </div>;
@@ -466,7 +499,7 @@ function Gym() {
   };
 
   const saveTemplate = async () => {
-    if (!buildName.trim()) return alert("Give your workout a name");
+    if (!buildName.trim()) return toast("Give your workout a name", "error");
     setSaving(true);
     const tid = editing?.id || uid();
     if (editing) {
@@ -642,7 +675,7 @@ function DailyLog() {
   const save = async () => {
     setSaving(true);
     const { error } = await sb.from("daily_logs").upsert({ date:form.date, weight:form.weight||null, sleep:form.sleep, energy:form.energy, mood:form.mood, stress:form.stress, protein:form.protein||null, carbs:form.carbs||null, fat:form.fat||null, water:form.water||null, steps:form.steps||null, notes:form.notes||null, saved_at:new Date().toISOString() }, { onConflict:"date" });
-    if(!error){ const {data}=await sb.from("daily_logs").select("*").order("date"); if(data)setLogs(data); alert("✓ Saved!"); } else alert("Error: "+error.message);
+    if(!error){ const {data}=await sb.from("daily_logs").select("*").order("date"); if(data)setLogs(data); toast("Log saved!"); } else toast("Error: "+error.message,"error");
     setSaving(false);
   };
 
@@ -853,7 +886,7 @@ function Body() {
   const saveMeasurements=async()=>{
     setSaving(true);
     const{error}=await sb.from("measurements").upsert({date:form.date,chest:form.chest||null,waist:form.waist||null,hips:form.hips||null,neck:form.neck||null,shoulder:form.shoulder||null,bicep:form.bicep||null,thigh:form.thigh||null,calf:form.calf||null,bf:form.bf||null},{onConflict:"date"});
-    if(!error){const{data}=await sb.from("measurements").select("*").order("date");if(data)setMeasurements(data);alert("✓ Saved!");}
+    if(!error){const{data}=await sb.from("measurements").select("*").order("date");if(data)setMeasurements(data);toast("Measurements saved!");}
     setSaving(false);
   };
 
@@ -867,8 +900,8 @@ function Body() {
         const{data:rows}=await sb.from("progress_photos").select("id,date,notes,photo_data").order("date",{ascending:true});
         if(rows){setPhotos(rows);if(rows.length>=1)setCompareA(rows[0].date);if(rows.length>=2)setCompareB(rows[rows.length-1].date);}
         setPhotoFile(null);setPhotoNotes("");
-      } else alert("Upload failed: "+error.message);
-    } catch(e){alert("Error: "+e.message);}
+      } else toast("Upload failed: "+error.message,"error");
+    } catch(e){toast("Error: "+e.message,"error");}
     setUploading(false);
   };
 
@@ -1556,14 +1589,21 @@ export default function LifeOS() {
   return (
     <div style={{ width:"100vw", minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'DM Sans','Helvetica Neue',sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&family=DM+Mono:wght@400;500;700&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-        html,body,#root{width:100%;min-height:100vh;background:#0a0a0f;}
+        html,body,#root{width:100%;min-height:100vh;background:#08080d;}
         body{overflow-x:hidden;}
-        ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:#0a0a0f;}::-webkit-scrollbar-thumb{background:#1e1e2e;border-radius:3px;}
-        input[type=range]{-webkit-appearance:none;height:4px;background:#1e1e2e;border-radius:2px;}
-        input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;cursor:pointer;}
-        select option{background:#12121a;}
+        ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#1e1e2e;border-radius:8px;}
+        input[type=range]{-webkit-appearance:none;height:3px;background:#1e1e2e;border-radius:8px;}
+        input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;cursor:pointer;border:2px solid #08080d;}
+        select option{background:#101018;}
+        select{transition:border-color 0.2s,box-shadow 0.2s;}
+        select:focus{outline:none;border-color:#00ff88!important;box-shadow:0 0 0 3px rgba(0,255,136,0.12)!important;}
+        button:not(:disabled):active{transform:scale(0.96)!important;}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+        .page-fade{animation:fadeIn 0.18s ease-out;}
         @media(max-width:639px){
           .r-grid-2{grid-template-columns:1fr!important;}
           .r-grid-3{grid-template-columns:repeat(2,1fr)!important;}
@@ -1572,8 +1612,8 @@ export default function LifeOS() {
       `}</style>
       <div style={{ position:"sticky", top:0, zIndex:100, background:"#0a0a0fee", backdropFilter:"blur(12px)", borderBottom:`1px solid ${C.border}`, padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ width:28, height:28, background:C.accent, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:900, color:"#000" }}>L</div>
-          <span style={{ fontWeight:900, fontSize:16, letterSpacing:"-0.02em" }}>LifeOS</span>
+          <div style={{ width:30, height:30, background:`linear-gradient(135deg,${C.accent},#4d8fff)`, borderRadius:9, display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:900, color:"#000", boxShadow:`0 4px 14px ${C.accent}44` }}>L</div>
+          <span style={{ fontWeight:900, fontSize:17, letterSpacing:"-0.03em", background:`linear-gradient(135deg,${C.accent},#4d8fff)`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>LifeOS</span>
           <span style={{ fontSize:11, color:C.muted, fontWeight:600 }}>v2.0</span>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -1584,7 +1624,7 @@ export default function LifeOS() {
       {isMobile ? (
         <>
           <main style={{ flex:1, padding:"16px 14px 76px", overflowY:"auto", minHeight:"calc(100vh - 57px)" }}>
-            <Page/>
+            <div key={tab} className="page-fade"><Page/></div>
           </main>
           <nav style={{ position:"fixed", bottom:0, left:0, right:0, display:"flex", background:"#0a0a0fee", backdropFilter:"blur(12px)", borderTop:`1px solid ${C.border}`, zIndex:100, paddingBottom:"env(safe-area-inset-bottom,0px)" }}>
             {NAV.map(n=>(
@@ -1599,16 +1639,17 @@ export default function LifeOS() {
         <div style={{ display:"flex", minHeight:"calc(100vh - 57px)" }}>
           <nav style={{ width:180, padding:"24px 12px", borderRight:`1px solid ${C.border}`, flexShrink:0, display:"flex", flexDirection:"column", gap:4 }}>
             {NAV.map(n=>(
-              <button key={n.id} onClick={()=>setTab(n.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px", background:tab===n.id?C.accentDim:"transparent", border:tab===n.id?`1px solid ${C.accentMid}`:"1px solid transparent", borderRadius:8, color:tab===n.id?C.accent:C.subtext, cursor:"pointer", fontSize:14, fontWeight:tab===n.id?700:500, textAlign:"left", transition:"all 0.15s", fontFamily:"inherit" }}>
+              <button key={n.id} onClick={()=>setTab(n.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background:tab===n.id?C.accentDim:"transparent", border:"none", borderRadius:8, borderLeft:tab===n.id?`3px solid ${C.accent}`:"3px solid transparent", color:tab===n.id?C.accent:C.subtext, cursor:"pointer", fontSize:14, fontWeight:tab===n.id?700:500, textAlign:"left", transition:"all 0.15s", fontFamily:"inherit", width:"100%" }}>
                 <span style={{ fontSize:16 }}>{n.icon}</span>{n.label}
               </button>
             ))}
           </nav>
           <main style={{ flex:1, padding:"24px 28px", overflowY:"auto" }}>
-            <Page/>
+            <div key={tab} className="page-fade"><Page/></div>
           </main>
         </div>
       )}
+      <ToastContainer/>
     </div>
   );
 }
