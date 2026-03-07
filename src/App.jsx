@@ -768,60 +768,368 @@ function Goals() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ANALYTICS HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+const MUSCLE_MAP={
+  "Squat":"Quads","Hack Squat":"Quads","Leg Press":"Quads","Leg Extension":"Quads","Bulgarian Split Squat":"Quads","DB Bulgarian Split Squat":"Quads","DB Goblet Squat":"Quads","DB Lunge":"Quads",
+  "Deadlift":"Back","Barbell Row":"Back","Lat Pulldown":"Back","Wide Grip Lat Pulldown":"Back","Cable Row":"Back","Seated Row":"Back","Chest Supported Row":"Back","Single Arm DB Row":"Back","DB Row":"Back","Pull-up":"Back",
+  "Bench Press":"Chest","Incline Press":"Chest","Close Grip Bench":"Chest","DB Bench Press":"Chest","DB Incline Press":"Chest","DB Flat Press":"Chest","Low Incline DB Press":"Chest","Cable Fly":"Chest","Chest Fly":"Chest","DB Fly":"Chest","DB Incline Fly":"Chest",
+  "Overhead Press":"Shoulders","DB Shoulder Press":"Shoulders","Machine Shoulder Press":"Shoulders","DB Lateral Raise":"Shoulders","DB Front Raise":"Shoulders","Cable Lateral Raise":"Shoulders","Cable Rear Delt Fly":"Shoulders","DB Reverse Fly":"Shoulders","Face Pull":"Shoulders",
+  "Romanian Deadlift":"Hamstrings","Sumo Deadlift":"Hamstrings","Leg Curl":"Hamstrings","DB Romanian Deadlift":"Hamstrings",
+  "Hip Thrust":"Glutes",
+  "Chin-up":"Biceps","DB Curl":"Biceps","DB Hammer Curl":"Biceps","DB Incline Curl":"Biceps","Cable Curl":"Biceps",
+  "Skull Crusher":"Triceps","Tricep Pushdown":"Triceps","Rope Overhead Tricep Extension":"Triceps","Rope Pushdowns":"Triceps","Cable Pushdowns":"Triceps","DB Tricep Kickback":"Triceps","DB Overhead Tricep Extension":"Triceps","Dip":"Triceps",
+  "Calf Raise":"Calves",
+};
+const MRV={Quads:20,Back:25,Chest:20,Shoulders:20,Biceps:20,Triceps:18,Hamstrings:16,Glutes:16,Calves:16};
+const MEV={Quads:8,Back:10,Chest:10,Shoulders:8,Biceps:8,Triceps:6,Hamstrings:6,Glutes:4,Calves:6};
+const e1rm=(w,r)=>Math.round(parseFloat(w||0)*(1+(parseInt(r)||0)/30));
+const GC={A:C.accent,B:C.blue,C:C.amber,D:C.red,F:C.red};
+const letterGrade=(val,thresholds)=>{const[a,b,c,d]=thresholds;return val>=a?"A":val>=b?"B":val>=c?"C":val>=d?"D":"F";};
+const weekMonday=()=>{const d=new Date();d.setDate(d.getDate()-(d.getDay()===0?6:d.getDay()-1));return d.toISOString().slice(0,10);};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ANALYTICS
 // ═══════════════════════════════════════════════════════════════════════════════
 function Analytics() {
   const [logs,setLogs]=useState([]);
   const [sessions,setSessions]=useState([]);
+  const [allSets,setAllSets]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [aTab,setATab]=useState("overview");
   const [range,setRange]=useState("30");
-  useEffect(()=>{ Promise.all([sb.from("daily_logs").select("*").order("date",{ascending:true}),sb.from("workout_sessions").select("*").order("date",{ascending:true})]).then(([l,s])=>{if(l.data)setLogs(l.data);if(s.data)setSessions(s.data);setLoading(false);}); },[]);
-  if(loading) return <Spinner />;
+  const [prEx,setPrEx]=useState("");
+
+  useEffect(()=>{
+    Promise.all([
+      sb.from("daily_logs").select("*").order("date",{ascending:true}),
+      sb.from("workout_sessions").select("*").order("date",{ascending:true}),
+      sb.from("session_sets").select("*"),
+    ]).then(([l,s,ss])=>{
+      if(l.data)setLogs(l.data);
+      if(s.data)setSessions(s.data);
+      if(ss.data){
+        setAllSets(ss.data);
+        const exes=[...new Set(ss.data.filter(x=>x.completed).map(x=>x.exercise))];
+        if(exes.length)setPrEx(exes[0]);
+      }
+      setLoading(false);
+    });
+  },[]);
+
+  if(loading) return <Spinner/>;
+
+  // ── Overview ──
   const sliced=range==="7"?last7(logs):logs.slice(-30);
   const data=sliced.map(l=>({date:l.date,weight:parseFloat(l.weight)||null,energy:l.energy,mood:l.mood,sleep:l.sleep,protein:parseFloat(l.protein)||null}));
-  const vByDay={}; sessions.forEach(s=>{vByDay[s.date]=(vByDay[s.date]||0)+(s.total_volume||0);});
+  const vByDay={};sessions.forEach(s=>{vByDay[s.date]=(vByDay[s.date]||0)+(s.total_volume||0);});
   const volData=data.map(d=>({date:d.date,volume:Math.round(vByDay[d.date]||0)}));
   const wkCount=sessions.filter(s=>data.some(d=>d.date===s.date)).length;
-  const exportAll=async()=>{ const[l,s,g,m]=await Promise.all([sb.from("daily_logs").select("*"),sb.from("workout_sessions").select("*"),sb.from("goals").select("*"),sb.from("measurements").select("*")]); const blob=new Blob([JSON.stringify({logs:l.data,sessions:s.data,goals:g.data,measurements:m.data},null,2)],{type:"application/json"}); const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`lifeos-${today()}.json`;a.click(); };
+
+  // ── Sets with dates ──
+  const sessById=Object.fromEntries(sessions.map(s=>[s.id,s]));
+  const setsWithDate=allSets.map(s=>({...s,date:sessById[s.session_id]?.date})).filter(s=>s.date&&s.completed);
+
+  // ── Correlations (sleep → energy/mood/volume) ──
+  const BUCKETS=["<6h","6-7h","7-8h","8+h"];
+  const bkt={};BUCKETS.forEach(b=>bkt[b]={energy:[],mood:[],volume:[]});
+  logs.forEach(l=>{
+    if(!l.sleep)return;
+    const h=parseFloat(l.sleep);
+    const b=h<6?"<6h":h<7?"6-7h":h<8?"7-8h":"8+h";
+    if(l.energy)bkt[b].energy.push(l.energy);
+    if(l.mood)bkt[b].mood.push(l.mood);
+    if(vByDay[l.date]>0)bkt[b].volume.push(vByDay[l.date]);
+  });
+  const corrData=BUCKETS.map(b=>({
+    label:b,
+    energy:bkt[b].energy.length>=2?parseFloat(avg(bkt[b].energy)):null,
+    mood:bkt[b].mood.length>=2?parseFloat(avg(bkt[b].mood)):null,
+    volume:bkt[b].volume.length>=1?Math.round(bkt[b].volume.reduce((a,v)=>a+v,0)/bkt[b].volume.length):null,
+  }));
+  const insights=[];
+  const validE=corrData.filter(d=>d.energy!==null);
+  if(validE.length>=2){
+    const best=[...validE].sort((a,b)=>b.energy-a.energy)[0];
+    const worst=[...validE].sort((a,b)=>a.energy-b.energy)[0];
+    if(best.label!==worst.label)insights.push({icon:"⚡",text:`Your energy peaks (${best.energy}/10) after ${best.label} sleep — drops to ${worst.energy}/10 after ${worst.label}`});
+    const validV=corrData.filter(d=>d.volume!==null);
+    if(validV.length>=2){const bv=[...validV].sort((a,b)=>b.volume-a.volume)[0];insights.push({icon:"🏋️",text:`You lift the most volume (avg ${Math.round(bv.volume/1000)}k lbs) after ${bv.label} of sleep`});}
+  }
+  const protDays=logs.filter(l=>l.protein&&l.energy);
+  if(protDays.length>=5){
+    const hi=protDays.filter(l=>parseFloat(l.protein)>=150),lo=protDays.filter(l=>parseFloat(l.protein)<150);
+    if(hi.length>=2&&lo.length>=2){
+      const avgHi=parseFloat(avg(hi.map(l=>l.energy))),avgLo=parseFloat(avg(lo.map(l=>l.energy)));
+      if(avgHi>avgLo+0.4)insights.push({icon:"🥩",text:`Days with 150g+ protein: energy ${avgHi.toFixed(1)}/10 vs ${avgLo.toFixed(1)}/10 on lower protein days`});
+    }
+  }
+  if(!insights.length)insights.push({icon:"📊",text:"Log at least 2 weeks of data to unlock personalized insights"});
+
+  // ── Weekly report card ──
+  const wkMon=weekMonday();
+  const wkLogs=logs.filter(l=>l.date>=wkMon);
+  const wkSess=sessions.filter(s=>s.date>=wkMon);
+  const sleepVals=wkLogs.filter(l=>l.sleep).map(l=>parseFloat(l.sleep));
+  const avgSleepWk=sleepVals.length?sleepVals.reduce((a,b)=>a+b,0)/sleepVals.length:null;
+  const protDaysWk=wkLogs.filter(l=>l.protein&&parseFloat(l.protein)>0).length;
+  const sessionsWk=wkSess.length;
+  const totalVolWk=wkSess.reduce((s,x)=>s+(x.total_volume||0),0);
+  const daysLoggedWk=wkLogs.length;
+  const reportCards=[
+    {label:"Sleep",    grade:avgSleepWk?letterGrade(avgSleepWk,[8,7,6,5]):"—", val:avgSleepWk?avgSleepWk.toFixed(1)+"h avg":"No data"},
+    {label:"Nutrition",grade:letterGrade(protDaysWk,[6,5,4,2]),              val:`${protDaysWk}/7 days protein logged`},
+    {label:"Training", grade:letterGrade(sessionsWk,[4,3,2,1]),              val:`${sessionsWk} sessions · ${Math.round(totalVolWk/1000)}k lbs`},
+    {label:"Consistency",grade:letterGrade(daysLoggedWk,[6,5,4,2]),         val:`${daysLoggedWk}/7 days logged`},
+  ];
+  const gScore={A:4,B:3,C:2,D:1,F:0,"—":0};
+  const overallGrade=(()=>{const s=reportCards.filter(g=>g.grade!=="—").map(g=>gScore[g.grade]);if(!s.length)return "—";const m=s.reduce((a,b)=>a+b,0)/s.length;return m>=3.5?"A":m>=2.5?"B":m>=1.5?"C":m>=0.5?"D":"F";})();
+
+  // ── PR timeline ──
+  const exOptions=[...new Set(setsWithDate.map(s=>s.exercise))].sort();
+  const prSets=setsWithDate.filter(s=>s.exercise===prEx&&parseFloat(s.actual_weight)>0);
+  const prByDate={};
+  prSets.forEach(s=>{const rm=e1rm(s.actual_weight,s.actual_reps);if(!prByDate[s.date]||rm>prByDate[s.date].e1rm)prByDate[s.date]={date:s.date,e1rm:rm,weight:parseFloat(s.actual_weight),reps:parseInt(s.actual_reps)||0};});
+  const prData=Object.values(prByDate).sort((a,b)=>a.date.localeCompare(b.date));
+  let maxRm=0;prData.forEach(d=>{if(d.e1rm>maxRm){d.isPR=true;maxRm=d.e1rm;}else d.isPR=false;});
+
+  // ── Volume landmarks ──
+  const wkSetsAll=setsWithDate.filter(s=>s.date>=wkMon);
+  const setsByMuscle={};wkSetsAll.forEach(s=>{const m=MUSCLE_MAP[s.exercise];if(m)setsByMuscle[m]=(setsByMuscle[m]||0)+1;});
+
+  const exportAll=async()=>{const[l,s,g,m]=await Promise.all([sb.from("daily_logs").select("*"),sb.from("workout_sessions").select("*"),sb.from("goals").select("*"),sb.from("measurements").select("*")]);const blob=new Blob([JSON.stringify({logs:l.data,sessions:s.data,goals:g.data,measurements:m.data},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`lifeos-${today()}.json`;a.click();};
+
+  const ATABS=[{id:"overview",label:"Overview"},{id:"report",label:"Report Card"},{id:"insights",label:"Insights"},{id:"prs",label:"PRs"},{id:"volume",label:"Volume"}];
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-        <SectionHeader title="Analytics" subtitle="Your trends at a glance"/>
-        <div style={{ display:"flex", gap:8 }}>{["7","30"].map(r=><Btn key={r} onClick={()=>setRange(r)} variant={range===r?"primary":"ghost"} small>{r}D</Btn>)}</div>
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <SectionHeader title="Analytics" subtitle="Performance intelligence"/>
+
+      {/* Sub-tabs */}
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+        {ATABS.map(t=>(
+          <button key={t.id} onClick={()=>setATab(t.id)} style={{flexShrink:0,padding:"6px 14px",borderRadius:8,border:`1px solid ${aTab===t.id?C.accent:C.border}`,background:aTab===t.id?C.accentDim:"transparent",color:aTab===t.id?C.accent:C.subtext,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      <Card><div className="r-grid-4" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:20 }}>
-        <Stat label="Avg Energy" value={avg(data.filter(d=>d.energy).map(d=>d.energy))} unit="/10" color={C.accent}/>
-        <Stat label="Avg Mood" value={avg(data.filter(d=>d.mood).map(d=>d.mood))} unit="/10" color={C.purple}/>
-        <Stat label="Avg Sleep" value={avg(data.filter(d=>d.sleep).map(d=>d.sleep))} unit="hrs" color={C.blue}/>
-        <Stat label="Workouts" value={wkCount} color={C.amber}/>
-      </div></Card>
-      {data.length>1 && <Card>
-        <div style={{ fontSize:12, color:C.accent, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>Energy, Mood & Sleep</div>
-        <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={data}><CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis domain={[0,12]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
-            <Line type="monotone" dataKey="energy" name="Energy" stroke={C.accent} strokeWidth={2} dot={false}/>
-            <Line type="monotone" dataKey="mood" name="Mood" stroke={C.purple} strokeWidth={2} dot={false}/>
-            <Line type="monotone" dataKey="sleep" name="Sleep" stroke={C.blue} strokeWidth={2} dot={false}/>
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>}
-      {data.filter(d=>d.weight).length>1 && <Card>
-        <div style={{ fontSize:12, color:C.blue, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>Weight</div>
-        <ResponsiveContainer width="100%" height={160}>
-          <AreaChart data={data.filter(d=>d.weight)}>
-            <defs><linearGradient id="wg2" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.blue} stopOpacity={0.25}/><stop offset="95%" stopColor={C.blue} stopOpacity={0}/></linearGradient></defs>
-            <CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
-            <Area type="monotone" dataKey="weight" name="Weight" stroke={C.blue} fill="url(#wg2)" strokeWidth={2} dot={false}/>
-          </AreaChart>
-        </ResponsiveContainer>
-      </Card>}
-      {volData.some(d=>d.volume>0) && <Card>
-        <div style={{ fontSize:12, color:C.amber, fontWeight:800, marginBottom:14, textTransform:"uppercase", letterSpacing:"0.1em" }}>Lifting Volume</div>
-        <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={volData}><CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/><Bar dataKey="volume" name="Volume (lbs)" fill={C.amber} radius={[4,4,0,0]}/></BarChart>
-        </ResponsiveContainer>
-      </Card>}
-      {data.length===0 && <Card><p style={{ color:C.muted, textAlign:"center", padding:40 }}>Start logging daily to see your analytics.</p></Card>}
+
+      {/* ── OVERVIEW ── */}
+      {aTab==="overview" && <>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          {["7","30"].map(r=><Btn key={r} onClick={()=>setRange(r)} variant={range===r?"primary":"ghost"} small>{r}D</Btn>)}
+        </div>
+        <Card><div className="r-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20}}>
+          <Stat label="Avg Energy" value={avg(data.filter(d=>d.energy).map(d=>d.energy))} unit="/10" color={C.accent}/>
+          <Stat label="Avg Mood"   value={avg(data.filter(d=>d.mood).map(d=>d.mood))}     unit="/10" color={C.purple}/>
+          <Stat label="Avg Sleep"  value={avg(data.filter(d=>d.sleep).map(d=>d.sleep))}   unit="hrs" color={C.blue}/>
+          <Stat label="Workouts"   value={wkCount} color={C.amber}/>
+        </div></Card>
+        {data.length>1 && <Card>
+          <div style={{fontSize:12,color:C.accent,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Energy, Mood & Sleep</div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={data}><CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis domain={[0,12]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
+              <Line type="monotone" dataKey="energy" name="Energy" stroke={C.accent} strokeWidth={2} dot={false}/>
+              <Line type="monotone" dataKey="mood"   name="Mood"   stroke={C.purple} strokeWidth={2} dot={false}/>
+              <Line type="monotone" dataKey="sleep"  name="Sleep"  stroke={C.blue}   strokeWidth={2} dot={false}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>}
+        {data.filter(d=>d.weight).length>1 && <Card>
+          <div style={{fontSize:12,color:C.blue,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Weight</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <AreaChart data={data.filter(d=>d.weight)}>
+              <defs><linearGradient id="wg2" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.blue} stopOpacity={0.25}/><stop offset="95%" stopColor={C.blue} stopOpacity={0}/></linearGradient></defs>
+              <CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
+              <Area type="monotone" dataKey="weight" name="Weight" stroke={C.blue} fill="url(#wg2)" strokeWidth={2} dot={false}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>}
+        {volData.some(d=>d.volume>0) && <Card>
+          <div style={{fontSize:12,color:C.amber,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Lifting Volume</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={volData}><CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/><YAxis tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/><Bar dataKey="volume" name="Volume (lbs)" fill={C.amber} radius={[4,4,0,0]}/></BarChart>
+          </ResponsiveContainer>
+        </Card>}
+        {data.length===0 && <Card><p style={{color:C.muted,textAlign:"center",padding:40}}>Start logging daily to see your analytics.</p></Card>}
+      </>}
+
+      {/* ── REPORT CARD ── */}
+      {aTab==="report" && <>
+        <Card style={{border:`1px solid ${GC[overallGrade]||C.border}33`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <div>
+              <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700,marginBottom:4}}>
+                Week of {new Date(wkMon+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}
+              </div>
+              <div style={{fontSize:17,fontWeight:900,color:C.text}}>Weekly Report Card</div>
+            </div>
+            <div style={{fontSize:60,fontWeight:900,color:GC[overallGrade]||C.muted,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{overallGrade}</div>
+          </div>
+          <div className="r-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {reportCards.map(g=>(
+              <div key={g.label} style={{background:C.surface,borderRadius:10,padding:"14px 16px",border:`1px solid ${(GC[g.grade]||C.border)}33`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>{g.label}</div>
+                  <div style={{fontSize:28,fontWeight:900,color:GC[g.grade]||C.muted,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{g.grade}</div>
+                </div>
+                <div style={{fontSize:12,color:C.subtext}}>{g.val}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Grading Scale</div>
+          {[["Sleep","A≥8h  B≥7h  C≥6h  D≥5h"],["Nutrition","A=6/7 days  B=5  C=4  D=2"],["Training","A=4+ sessions  B=3  C=2  D=1"],["Consistency","A=6/7 days logged  B=5  C=4  D=2"]].map(([l,s])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.border}22`,fontSize:12}}>
+              <span style={{color:C.subtext,fontWeight:600}}>{l}</span>
+              <span style={{color:C.muted,fontFamily:"'DM Mono',monospace",fontSize:11}}>{s}</span>
+            </div>
+          ))}
+        </Card>
+      </>}
+
+      {/* ── INSIGHTS ── */}
+      {aTab==="insights" && <>
+        <Card style={{border:`1px solid ${C.accent}22`}}>
+          <div style={{fontSize:12,color:C.accent,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Correlation Insights</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {insights.map((ins,i)=>(
+              <div key={i} style={{display:"flex",gap:12,alignItems:"flex-start",padding:"12px 14px",background:C.surface,borderRadius:10}}>
+                <span style={{fontSize:20,flexShrink:0}}>{ins.icon}</span>
+                <span style={{fontSize:14,color:C.text,lineHeight:1.5}}>{ins.text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+        {corrData.some(d=>d.energy!==null) && <Card>
+          <div style={{fontSize:12,color:C.blue,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Avg Energy by Sleep Duration</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={corrData.filter(d=>d.energy!==null)}>
+              <CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="label" tick={{fill:C.muted,fontSize:11}}/><YAxis domain={[0,10]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
+              <Bar dataKey="energy" name="Avg Energy" fill={C.blue} radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>}
+        {corrData.some(d=>d.mood!==null) && <Card>
+          <div style={{fontSize:12,color:C.purple,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Avg Mood by Sleep Duration</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={corrData.filter(d=>d.mood!==null)}>
+              <CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="label" tick={{fill:C.muted,fontSize:11}}/><YAxis domain={[0,10]} tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
+              <Bar dataKey="mood" name="Avg Mood" fill={C.purple} radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>}
+        {corrData.some(d=>d.volume!==null) && <Card>
+          <div style={{fontSize:12,color:C.amber,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>Avg Lifting Volume by Sleep Duration</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={corrData.filter(d=>d.volume!==null)}>
+              <CartesianGrid stroke={C.border} strokeDasharray="3 3"/><XAxis dataKey="label" tick={{fill:C.muted,fontSize:11}}/><YAxis tick={{fill:C.muted,fontSize:10}}/><Tooltip content={<CTip/>}/>
+              <Bar dataKey="volume" name="Avg Volume (lbs)" fill={C.amber} radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>}
+        {!corrData.some(d=>d.energy!==null) && <Card><p style={{color:C.muted,textAlign:"center",padding:40,fontSize:13}}>Log at least 2 weeks of data with sleep tracked to see correlations.</p></Card>}
+      </>}
+
+      {/* ── PRs ── */}
+      {aTab==="prs" && <>
+        {exOptions.length===0
+          ? <Card><p style={{color:C.muted,textAlign:"center",padding:40}}>Complete workouts to build your PR history.</p></Card>
+          : <>
+            <Card style={{padding:"14px 20px"}}>
+              <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:8}}>Exercise</div>
+              <select value={prEx} onChange={e=>setPrEx(e.target.value)} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"10px 12px",fontSize:14,outline:"none",width:"100%"}}>
+                {exOptions.map(e=><option key={e}>{e}</option>)}
+              </select>
+            </Card>
+            {prData.length>0 ? <>
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={{fontSize:12,color:C.accent,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.1em"}}>Est. 1RM Over Time</div>
+                  <Tag color={C.amber}>Peak: {maxRm} lbs</Tag>
+                </div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={prData}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3"/>
+                    <XAxis dataKey="date" tickFormatter={fmt} tick={{fill:C.muted,fontSize:10}}/>
+                    <YAxis domain={["auto","auto"]} tick={{fill:C.muted,fontSize:10}}/>
+                    <Tooltip content={({active,payload,label})=>{
+                      if(!active||!payload?.length)return null;
+                      const d=payload[0]?.payload;
+                      return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px"}}>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{fmt(label)}</div>
+                        <div style={{fontSize:15,color:C.accent,fontWeight:800}}>e1RM: {d?.e1rm} lbs</div>
+                        <div style={{fontSize:12,color:C.subtext}}>{d?.weight}lbs × {d?.reps} reps</div>
+                        {d?.isPR&&<div style={{fontSize:11,color:C.amber,fontWeight:700,marginTop:4}}>★ All-time PR</div>}
+                      </div>;
+                    }}/>
+                    <Line type="monotone" dataKey="e1rm" name="Est. 1RM" stroke={C.accent} strokeWidth={2}
+                      dot={(props)=>{const{cx,cy,payload}=props;return <circle key={payload.date} cx={cx} cy={cy} r={payload.isPR?5:3} fill={payload.isPR?C.amber:C.accent} stroke="none"/>;}}/>
+                  </LineChart>
+                </ResponsiveContainer>
+                <div style={{fontSize:11,color:C.muted,marginTop:8,textAlign:"center"}}>⭐ gold dots = all-time PRs · Epley formula: weight × (1 + reps/30)</div>
+              </Card>
+              {prData.filter(d=>d.isPR).length>0 && <Card>
+                <div style={{fontSize:12,color:C.amber,fontWeight:800,marginBottom:14,textTransform:"uppercase",letterSpacing:"0.1em"}}>PR History</div>
+                {[...prData].filter(d=>d.isPR).reverse().map((d,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.border}22`}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:C.text}}>{d.weight}lbs × {d.reps} reps</div>
+                      <div style={{fontSize:11,color:C.muted}}>{fmt(d.date)}</div>
+                    </div>
+                    <div style={{fontSize:18,fontWeight:900,color:C.amber,fontFamily:"'DM Mono',monospace"}}>{d.e1rm}<span style={{fontSize:12,fontWeight:500,color:C.subtext}}> e1RM</span></div>
+                  </div>
+                ))}
+              </Card>}
+            </> : <Card><p style={{color:C.muted,textAlign:"center",padding:40,fontSize:13}}>No logged sets yet for {prEx}.</p></Card>}
+          </>
+        }
+      </>}
+
+      {/* ── VOLUME ── */}
+      {aTab==="volume" && <>
+        <Card>
+          <div style={{fontSize:12,color:C.blue,fontWeight:800,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.1em"}}>Weekly Volume Landmarks</div>
+          <div style={{fontSize:12,color:C.subtext,marginBottom:20}}>Sets logged this week · MEV = minimum effective · MRV = junk volume threshold</div>
+          {Object.keys(MRV).map(muscle=>{
+            const sets=setsByMuscle[muscle]||0;
+            const mrv=MRV[muscle],mev=MEV[muscle];
+            const pct=Math.min((sets/mrv)*100,100);
+            const overMRV=sets>=mrv,nearMRV=sets>=mrv*0.8&&!overMRV;
+            const color=overMRV?C.red:nearMRV?C.amber:sets>=mev?C.accent:C.muted;
+            const badge=overMRV?"⚠ Junk Volume":nearMRV?"Approaching MRV":sets>=mev?"In Effective Range":sets>0?"Below MEV":"—";
+            return (
+              <div key={muscle} style={{marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                  <span style={{fontSize:14,fontWeight:700,color:sets>0?C.text:C.muted}}>{muscle}</span>
+                  <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                    <span style={{fontSize:11,color,fontWeight:700}}>{badge}</span>
+                    <span style={{fontSize:15,fontWeight:900,color,fontFamily:"'DM Mono',monospace"}}>{sets}<span style={{fontSize:11,color:C.muted,fontWeight:400}}>/{mrv}</span></span>
+                  </div>
+                </div>
+                <div style={{position:"relative",height:8,background:C.surface,borderRadius:4}}>
+                  <div style={{position:"absolute",height:"100%",left:0,width:`${(mev/mrv)*100}%`,background:C.border,borderRadius:4}}/>
+                  <div style={{position:"absolute",height:"100%",left:0,width:`${pct}%`,background:color,borderRadius:4,transition:"width 0.3s"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:3,fontSize:10,color:C.muted}}>
+                  <span>MEV: {mev} sets</span><span>MRV: {mrv} sets</span>
+                </div>
+              </div>
+            );
+          })}
+          {!Object.keys(setsByMuscle).length && <p style={{color:C.muted,textAlign:"center",padding:20,fontSize:13}}>Log workouts this week to see your volume breakdown.</p>}
+        </Card>
+        <Card>
+          <div style={{fontSize:12,color:C.accent,fontWeight:800,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.1em"}}>This Week</div>
+          <div className="r-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+            <Stat label="Sessions" value={sessionsWk} color={C.blue}/>
+            <Stat label="Total Sets" value={wkSetsAll.length} color={C.accent}/>
+            <Stat label="Volume" value={(totalVolWk/1000).toFixed(1)} unit="k lbs" color={C.amber}/>
+          </div>
+        </Card>
+      </>}
+
       <Btn variant="ghost" onClick={exportAll} full>↓ Export All Data</Btn>
     </div>
   );
